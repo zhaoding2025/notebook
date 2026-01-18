@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: test
+spec:
+  selector:
+    matchLabels:
+      web: nginx
+  template:
+    metadata:
+      labels:
+        web: nginx
+    spec:
+      volumes:                  # 定义存储卷
+      - name: config            # 存储卷名字（自定义）
+        configMap:              # 存储卷类型
+          name: nginx-config    # 类型的名称（提前创建好的）
+      - name: conf              # 存储卷名字（自定义）
+        configMap:              # 存储卷类型
+          name: nginx-conf      # 类型的名称（提前创建好的）
+      - name: nginx-logs        # 存储卷名称
+        emptyDir: {}            # 类型为emptyDir，{}表示空目录
+      - name: html
+        hostPath:
+          path: /html
+          type: DirectoryOrCreate
+      containers:
+      - name: nginx
+        image: nginx:1.27.0
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        imagePullPolicy: IfNotPresent   # 镜像拉取策略
+        volumeMounts:
+        - name: nginx-logs
+          mountPath: /var/log/nginx
+        - name: html
+          mountPath: /usr/share/nginx/html
+---
+apiVersion: v1               # service版本
+kind: Service                     # service类型
+metadata:                         # 元数据
+  name: nginx-svc                 # service名称
+  namespace: test                 # 名称空间
+spec:                             # service详细配置
+  type: ClusterIP                 # 访问方式clusterIP
+  selector:                       # 标签选择器（通过标签选择关联的pod）
+      web:  nginx           # 标签名字要与pod保持一致
+  ports:                          # 定义service端口信息
+    - protocol: TCP               # 端口协议，默认TCP
+      port: 80                    # service接收请求的端口，自定义
+      targetPort: 80              # 转发给目标容器端口 
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+~                                                                                                                                                                                                                                            
+"deploy-nginx.yml" 22L, 370B                                                                                                                                                                                               18,10         All

@@ -1,0 +1,38 @@
+apiVersion: apps/v1         # 控制器对象版本
+kind: Deployment            # 控制器类型
+metadata:                   # 控制器元数据
+  name: mysql            # 控制器名称
+  namespace: test           # 控制器的名称空间
+spec:                       # 控制器详细配置信息
+  replicas: 1               # 定义Pod的副本数
+  selector:                 # 标签选择器（根据标签选择管理的Pod）
+    matchExpressions:       # 定义标签的类型
+    - key: db              # 标签名称         - 代表列表类型
+      operator: In          # In表示包含
+      values:               # 定义标签的值
+      - mysql               # 值名称
+  template:                 # Pod模版（母版）用于定义Pod配置
+    metadata:               # Pod模版元数据（Pod元数据）
+      labels:               # 定义Pod标签
+        db: mysql          # 标签（要与selector中定义的标签一致）
+    spec:                   # 定义Pod详细配置
+      nodeSelector:
+        selector: node1
+      containers:           # 容器列表
+      - name: mysql         # 容器名称
+        image: mysql:8.0 # 容器镜像
+        ports:              # 容器端口
+        - containerPort: 3306 # 端口号
+        env:                # 定义变量
+        - name: TZ          # 变量名称
+          value: "Asia/Shanghai"  # 变量值
+        - name: MYSQL_ROOT_PASSWORD
+          value: Admin123
+        - name: MYSQL_DATABASE
+          value: test
+        - name: MYSQL_USER
+          value: test
+
+
+
+        

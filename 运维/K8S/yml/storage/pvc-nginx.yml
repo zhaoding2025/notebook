@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nginx-pvc-data
+  namespace: test
+spec:
+  accessModes:              # 访问模式，访问模式要与PV模式相同，否则绑定
+    - ReadWriteOnce         # 读写权限
+  resources:                # 请求
+    requests:               # 资源
+      storage: 1Gi          # 资源大小，在绑定PV时，如果超出PV空间范围
+
+

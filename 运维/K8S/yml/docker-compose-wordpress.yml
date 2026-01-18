@@ -1,0 +1,18 @@
+services:
+  db:
+    container_name: mysql
+    image: wp-mysql:1.8.0
+    expose:
+      - 3306
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql_data/:/var/lib/mysql
+
+  wordpress:
+    container_name: wordpress
+    image: wordpress:v6.0
+    expose:
+      - 80
+    ports:
+      - "80:80"

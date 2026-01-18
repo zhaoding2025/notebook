@@ -1,0 +1,38 @@
+apiVersion: apps/v1         # 控制器对象版本
+kind: Deployment            # 控制器类型
+metadata:                   # 控制器元数据
+  name: nginx            # 控制器名称
+  namespace: test           # 控制器的名称空间
+spec:                       # 控制器详细配置信息
+  replicas: 1               # 定义Pod的副本数
+  selector:                 # 标签选择器（根据标签选择管理的Pod）
+    matchExpressions:       # 定义标签的类型
+    - key: app              # 标签名称         - 代表列表类型
+      operator: In          # In表示包含
+      values:               # 定义标签的值
+      - nginx               # 值名称
+  template:                 # Pod模版（母版）用于定义Pod配置
+    metadata:               # Pod模版元数据（Pod元数据）
+      labels:               # 定义Pod标签
+        app: nginx          # 标签（要与selector中定义的标签一致）
+    spec:                   # 定义Pod详细配置
+      containers:           # 容器列表
+      - name: nginx         # 容器名称
+        image: nginx:1.27.0 # 容器镜像
+        imagePullPolicy: IfNotPresent # 设置镜像拉取策略
+        ports:              # 容器端口
+        - containerPort: 80 # 端口号
+          name: http        # 端口名称
+          protocol: TCP     # 端口协议
+        resources:          # 定义资源限额
+          limits:           # 资源上限
+            cpu: "0"        # 表示一核心CPU资源
+            memory: "128M"  # 内存单位可以使用G、M等形式
+        livenessProbe:      # 存活探针
+          exec:             # 命令探测
+            command:        # 要执行的命令列表
+            - ls 
+            - /etc/hello.txt  # 探测一个不存在的文件
+
+
+        

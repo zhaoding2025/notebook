@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      web: nginx
+  template:
+    metadata:
+      labels:
+        web: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27.0
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        imagePullPolicy: IfNotPresent   # 镜像拉取策略
+        resources:
+          limits:
+            cpu: "100m"
+---
+apiVersion: v1               # service版本
+kind: Service                     # service类型
+metadata:                         # 元数据
+  name: nginx-svc                 # service名称
+  namespace: test                 # 名称空间
+spec:                             # service详细配置
+  type: NodePort                 # 访问方式NodePort
+  selector:                       # 标签选择器（通过标签选择关联的pod）
+      web:  nginx           # 标签名字要与pod保持一致
+  ports:                          # 定义service端口信息
+    - protocol: TCP               # 端口协议，默认TCP
+      port: 80                    # service接收请求的端口，自定义
+      targetPort: 80              # 转发给目标容器端口 
+      nodePort: 30007             # NodePort暴露的端口（范围30000-32767）

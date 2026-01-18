@@ -1,0 +1,765 @@
+## 1.环境准备
+# 修改主机名
+# 资源配置：2C/4G/50G
+hostnamectl set-hostname master
+hostnamectl set-hostname node1
+hostnamectl set-hostname 
+# 解析主机名
+vi /etc/hosts
+172.16.96.134 master
+172.16.96.201 node1
+172.16.96.202 node2
+# 开启网桥过滤
+cat > /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+# 开启bridge功能，需要加载br-netfilter模块来允许在bridge设备上的数据包经过iptables防火墙处理
+modprobe br_netfilter && lsmod |grep br_netfilter
+# 加载配置文件，使上述配置生效
+sysctl -p /etc/sysctl.d/k8s.conf
+# 安装IPvs代理模块
+# k8s中service有两种代理模式，一种基于iptables的，一种基于ipvs
+# ipset和ipvsadm是网络管理和负载均衡相关的软件包，提供ip_vs模块
+dnf -y install ipset ipvsadm
+# /etc/modules-load.d/目录主要用于在系统启动时加载用户自定义的内核模块
+cat > /etc/modules-load.d/ip_vs.conf << EOF
+ip_vs                
+ip_vs_rr            
+ip_vs_wrr           
+ip_vs_sh            
+nf_conntrack        
+EOF
+
+ip_vs                // 提供负载均衡的模块，支持多种负载均衡算法，如轮询，最小连接，加权最小连接
+ip_vs_rr            // 轮询算法的模块（默认算法）
+ip_vs_wrr           // 加权轮询算法的模块，根据后端服务器的权重值转发请求
+ip_vs_sh            // 哈希算法的模块，同一客户端的请求始终被分到相同的后端服务器，保证会话一致性
+nf_conntrack        // 链接跟踪的模块，用于跟踪一个连接的状态，例如TCP握手、数据传输和连接关闭等
+
+# 加载模块生效
+systemctl restart systemd-modules-load.service
+# 过滤模块，验证是否成功加载
+lsmod |grep ip_vs
+# 关闭swap分区
+swapoff -a && sed -ri 's/.*swap.*/#&/' /etc/fstab
+
+## Docker环境准备
+# 添加阿里云docker-ce仓库
+dnf install -y yum-utils && yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+# 安装docker软件包
+dnf install docker-ce-20.10.24
+# 启用docker cgroup用于限制进程的资源使用量，如CPU、内存资源
+# 1. 创建/编辑 Docker 配置文件
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json <<-'EOF'
+{
+  "registry-mirrors": [
+    "https://hub-mirror.c.163.com",
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.m.daocloud.io",
+    "https://docker.mirrors.ustc.edu.cn"
+  ]
+}
+EOF
+
+# 2. 重启 Docker 服务使配置生效
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+# 3. 验证配置是否生效
+docker info | grep -i "registry-mirrors"
+# 输出包含配置的加速器地址即成功
+
+
+## 集群部署
+# 方式：kubeadm部署方式、二进制包部署方式、其他部署，Rancher、kubesphere、sealos、kuboard
+# 配置k8s仓库
+# x86.64
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+
+# aarch64
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-aarch64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=http://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg http://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+
+# 安装集群相关软件
+# kubeadm：用于初始化集群，并配置集群所需的组件并生成对应的安全证书和令牌
+# kubelet：负责与master节点通信，并根据master节点调度策略来创建，更新和删除Pod，同时维护node节点上的容器状态
+# kubectl：用于管理k8s集群的一个命令工具
+dnf list --showduplicates kubeadm
+dnf install -y --nogpgcheck kubeadm-1.23.17-0 kubelet-1.23.17-0 kubectl-1.23.17-0
+# kubelet启用Cgroup控制组，用于限制进程的资源使用量，如CPU、内存
+tee > /etc/sysconfig/kubelet << EOF 
+    KUBELET_EXTRA_ARGS="--cgroup-driver=systemd"
+EOF
+# 设置kubelet开机自启动，集群初始化后自动启动
+systemctl enable kubelet && systemctl start kubelet
+
+master节点：
+kubeadm config images list
+[root@master ~]# kubeadm config print init-defaults > kube-init.yml
+[root@master ~]# vi kube-init.yml 
+      advertiseAddress: 172.16.96.134
+  name: master
+imageRepository: registry.cn-hangzhou.aliyuncs.com/google_containers
+# 初始化
+[root@master ~]# kubeadm init --config kube-init.yml 
+# 其他集群重新打印获取token
+kubeadm token create --print-join-command
+
+Node节点：
+[root@node1 ~]# export DOCKER_API_VERSION=1.41
+[root@node1 ~]# kubeadm join 172.16.96.134:6443 --token abcdef.0123456789abcdef         --discovery-token-ca-cert-hash sha256:9bffc18dc83a6f844e927a0a388cf63c58f542c78b4cc1770bb20de7aaf445a6
+
+# 部署calico网络
+Master节点
+[root@master ~]# wget https://raw.githubusercontent.com/projectcalico/calico/v3.24.1/manifests/calico.yaml
+[root@master ~]# kubectl apply -f calico.yaml 
+[root@master ~]# kubectl get pod -n kube-system
+
+# 部署Nginx测试集群
+[root@master ~]# vi nginx-test.yml
+
+# 创建Pod
+[root@master ~]# kubectl apply -f nginx-test.yml 
+# 查看service的NodePort端口
+[root@master ~]# kubectl get service
+# 浏览器访问测试：任意节点ip皆可访问
+http://IP:30002
+
+
+## k8s web管理界面
+# 方式1:Kuboard管理k8s集群
+# 安装kuboard图形管理平台 https://kuboard.cn/install/v3/install-built-in.html#%E5%AE%89%E8%A3%85
+# 参考文档：https://kuboard.cn/v4/install/quickstart.html#%E9%9B%86%E6%88%90%E5%A4%96%E9%83%A8%E7%94%A8%E6%88%B7%E5%BA%93
+
+# 方式2:rancher
+[root@master ~]# docker run -d --restart=unless-stopped -p 80:80 -p 443:443 --privileged rancher/rancher
+
+
+
+
+K8S技术点
+## 第一章 k8s资源管理方式
+# 所有资源查看命令
+[root@master ~]# kubectl api-resources
+# 显示集群信息
+[root@master ~]# kubectl cluster-info
+# 通过all查看空间中pods、pod控制器service信息
+[root@master ~]# kubectl get all -n kube-system
+# 命名空间管理
+[root@master ~]# kubectl create ns test
+[root@master ~]# kubectl delete ns test
+# 资源管理YAML
+# 资源文档查询方法：kubectl explain资源名称
+[root@master yml]# kubectl explain ns
+[root@master yml]# kubectl explain ns.metadata
+# 通过yaml文件创建资源
+[root@master yml]# kubectl apply -f test-ns.yml 
+# 查看名称空间
+[root@master yml]# kubectl get ns
+# 通过yaml文件删除资源
+[root@master yml]# kubectl delete -f test-ns.yml 
+
+## 第四章 Pod与Pod控制器
+# Pod资源属性
+# k8s中基本所有资源的一级属性都是一样的，主要分为五部分：
+# apiVersion    // 资源版本，由k8s内部定义，可通过资源对应文档查询
+# kind          // 资源类型，由k8s内部定义，可通过资源对应文档查询
+# metadata      // 资源元数据，常用的有name,namespace,labels等
+# spec          // 定义资源详细配置信息，是资源对象中最重要的一部分
+# status        // 资源状态信息，里面的内容不需要定义，由资源自动生成
+[root@master yml]# kubectl apply -f nginx-static.yml 
+[root@master yml]# kubectl get pod nginx -o yaml
+
+# Pod控制器
+# k8s中Pod控制器（controller）用于管理和控制Pod的生命周期、副本数和状态
+# 主要作用：
+# 副本管理：Pod控制器可以定义和管理Pod的副本数，确保指定数量的Pod副本在集群中运行
+# 自我修复：控制器通过监视Pod的状态，如果Pod出现故障或被删除，控制器会自动重启或创建新Pod
+# 扩缩容：在控制器中通过增加Pod副本数，实现快速扩容Pod数量应对流量高峰，并在流量低峰时段，缩减Pod副本数，避免资源浪费
+# 版本管理：通过控制器可实现程序版本的升级和回退
+
+## ReplicaSet控制器
+# ReplicaSet(RS)控制器具备副本管理、自我修复、扩缩容、Pod调度等功能
+# 案例：RS控制器创建Nginx
+[root@master yml]# kubectl apply -f rs-nginx.yml 
+# 查看RS控制器信息
+[root@master yml]# kubectl get rs -o wide -n test
+# desired   需要创建的Pod总数量
+# current   当前创建的Pod数量
+# ready     ready的Pod数量
+# 方式2：通过命令行直接修改（YAML文件不会跟着发生变化）
+[root@master yml]# kubectl scale rs rs-nginx --replicas=3 -n test
+# 方式3：通过edit编辑资源的配置（YAML文件不会跟着发生变化）
+[root@master yml]# kubectl edit rs rs-nginx -n test
+# 查看
+[root@master yml]# kubectl get rs -n test
+# 删除
+# 方式1：基于命令的
+[root@master yml]# kubectl delete rs rs-nginx -n test
+# 方式2：基于文件的
+[root@master yml]# kubectl delete -f rs-nginx.yml 
+
+## Deployment控制器
+# Deployment(deploy)控制器是在RS控制器的基础上进行了扩展和增强，除了具备RS所有功能以外，还支持版本的滚动更新，版本回退等功能
+# Deployment管理Pod
+[root@master yml]# vimdiff rs-nginx.yml deploy-nginx.yml 
+[root@master yml]# kubectl apply -f deploy-nginx.yml 
+[root@master yml]# kubectl get deploy -n test
+# 字段解释
+# UP-TO-DATE  最新的Pod数量
+# Available   可用的Pod数量
+
+## Pod各阶段状态
+# Pod的生命周期分为几个阶段，主要用来理解Pod的当前状态和问题所在：
+# Pending：Pod已经被系统接受，但是它需要完成一些准备工作才能运行。这些工作包括分配到指定节点上，下载容器镜像等。这个阶段就是Pod的“准备”阶段
+# Running：Pod已经被分配到节点上，同时Pod中的容器都已经创建。至少有一个容器在运行、或处于启动、重启状态，这个阶段可以被看作是Pod的“运行”阶段
+# Succeeded：Pod的所在容器都已经成功完成了他们的任务，并且都成功的终止了，且不会再重启。这个阶段看作是Pod的“完成”阶段
+# error：Pod中的容器是因为启动或运行失败而停止的。这个阶段可以被看作是Pod的“失败”阶段
+# Unknown：系统无法确定Pod的状态。通常是因为与Pod所在的主机通讯失败导致。这个阶段可以被看作是Pod的“未知”阶段
+# CrashLoopBackOff：这个状态通常意味着Pod中的一个或多个容器在启动后立即崩溃，系统在重新启动它，但是连续多次尝试都失败了
+
+## 容器镜像拉取策略
+# imagePullPolicy 属性用于设置镜像拉取策略，k8s支持三种拉取策略：
+#   Always：总是从远程仓库拉取镜像
+#   IfNotPresent：本地有则使用本地镜像，本地没有则从远程仓库拉取
+#   Never：只使用本地镜像，从不去远程仓库拉取，本地如果没有就报错
+# 默认值：如果镜像tag为具体版本号，默认策略是：IfNotPresent，如果镜像tag为latest，默认策略是Always
+# 查询方法：
+[root@master yml]# kubectl explain pod.spec.containers.imagePullPolicy
+
+# 容器端口设置
+# ports属性用于配置容器需要暴露的端口列表，支持的属性：
+#   containerPort：容器要监听的端口，不定义，采用默认端口
+#   name：端口名称，如果指定，必须保证在该pod中是唯一的
+#   protocol：端口协议，支持TCP、UDP、默认TCP
+
+# 容器资源配额
+# resources属性用于限制Pod中的容器对系统的资源的使用量，避免容器出现问题，大量吞噬系统资源，k8s目前提供了对内存和CPU的资源限制
+# 如果超过资源使用量，k8s则认为该容器出现故障，对容器进行重启
+# resources支持的属性：
+#   limits：限制容器资源上限，当容器超出该使用量时，容器会被终止，并进行重启
+#   requests：限制容器需要的最小资源，如果环境资源不够，容器将无法启动，如果不定义，默认与limits相等
+# 提示：requests定义的值不能高于limits的值，否则会报错
+
+# 进入Pod中容器，命令格式：
+# kubectl exec -it -n 命名空间 pod名称 -c 容器名称 -- /bin/bash
+# 进入redis容器
+[root@master yml]# kubectl exec -it -n test nginx-85d5749754-k587d -c redis -- bash
+# 对Pod中容器执行命令
+# 命令格式：kubectl exec -n 名称空间 pod名 -c 容器名 -- 命令
+# 提示：不是进入容器，所以没有-it选项
+[root@master yml]# kubectl exec -n test nginx-85d5749754-k587d -c nginx -- ls
+
+# 容器环境变量
+# env 属性用于设置容器环境变量，环境变量根据容器具体需求定义，env支持的属性：
+# name：定义环境变量名称
+# value：定义变量值
+# 案例：为MySQL添加环境变量设置root密码
+# 资源文档查询方法：kubectl explain pod.spec.containers.env
+[root@master yml]# kubectl apply -f deploy-mysql.yml 
+[root@master yml]# kubectl exec -it mysql-7795cb96d7-hzw4n -n test -- bash
+
+
+## Pod调度策略
+# 在默认情况下，一个Pod被调度到哪个Node节点运行，由Scheduler对Pod进行调度，不受人工干预，但如果想要控制Pod调度到指定的Node节点，需要用到Pod调度
+# k8s提供的调度方式：
+#   定向调度
+#   亲和性调度
+#   反亲和性调度
+# Pod定向调度
+#   定向调度是通过在Pod上声明nodeName或者nodeSelector将pod调度到指定的节点上
+#   nodeName：根据节点名称，强制将Pod调度到指定节点上
+#   nodeSelector：根据节点标签，强制将Pod调度到指定节点上
+# Tips：nodeName、nodeSelector属于强制调度，即使指定的节点不存在，也会向该节点调度，只不过pod运行失败而已
+# 查看节点标签
+[root@master yml]# kubectl get node node1 --show-labels
+# 设置节点标签
+[root@master yml]# kubectl label node node1 selector=node1
+
+# 亲和性调度（Affinity）：用于指定Pod与某些标签匹配的节点进行调度
+#   podAffinity：pod亲和性调度
+#     requiredDuringSchedulingIgnoredDuringExecution：pod的硬亲和调度
+#     preferredDuringSchedulingIgnoredDuringExecution：pod的软亲和调度
+# 反亲和性调度（Anti-Affinity）：用于指定Pod与某些标签不匹配的节点进行调度
+#   podAntiAffinity：pod反亲和性调度
+# Tips：亲和性和反亲和性调度都需要大量算法进行计算，因此会降低调度速度，官方不建议在集群中使用这类设置
+[root@master yml]# kubectl apply -f deploy-mysql.yml 
+[root@master yml]# kubectl apply -f deploy-redis-affinity.yml 
+
+
+## Pod污点与容忍
+# 污点（Taint）：通过在节点添加污点属性，可避免Pod被分配到不合适的节点
+# 容忍（Toleration）：通过在Pod上添加容忍属性，允许Pod被调度到带有污点的节点上
+# 污点属性说明：
+#   PreferNoSchedule：避免调度（软限制）除非没有其他节点可调度
+#   NoSchedule：拒绝调度（硬限制）不影响当前节点已存在的Pod
+#   NoExecute：拒绝调度，同时驱逐已经在的Pod
+# 案例：对node2节点添加污点PreferNoSchedule属性，避免Pod调度。为了演示污点效果，将前面案例创建的Pod先删掉，将node1节点关机
+# 添加污点格式：kubectl taint node 节点名称 key=value:污点属性
+# 更新污点格式：kubectl taint node 节点名称 key=value:新污点属性
+# 删除污点格式：kubectl taint node 节点名称 key=value:污点-
+# 添加污点属性
+[root@master yml]# kubectl taint node node2 node=node2:PreferNoSchedule
+# 查看污点属性 
+[root@master yml]# kubectl describe node node2 |grep -i taint
+# 通过nodeName指定的节点，如果设置了污点，Pod也会强制调度过去
+# nodeSelector如果调度的节点有污点，则无法调度过去
+# Tips：使用kubeadm搭建的集群，默认会给master节点添加NodeSchedule污点，默认情况下Pod不会被调度到Master节点
+[root@master yml]# kubectl describe node master |grep -i taint
+# 容忍（Toleration）：通过tolerations在Pod上添加容忍属性，来容忍特定的污点，即使节点上存在匹配的污点，也可以将Pod调度到该节点
+# tolerations属性说明
+#   key：污点的key
+#   value：key的值
+#   effect：污点类型（IfNotPresent、NoSchedule）
+
+## 容器探测检查
+# 容器探测检查用于判断容器中的程序是否可以正常工作，k8s提供了两种探针来实现对容器的探测：
+#   liveness Probe：存活探针，检测容器是否为正常运行状态，如果不是，容器将会被重启
+#   readiness Probe：就绪探针，检测容器当前是否能接收请求，如果不能，k8s不会分配流量，但不会被重启
+# 以上两种探针目前均支持多种探测方式，可通过下边命令查看：
+#   存活探针文档：kubectl explain pod.spec.containers.livenessProbe
+#   就绪探针文档：kubectl explain pod.spec.containers.readinessProbe
+# exec：通过在容器内执行命令，来判断容器是否可以正常工作
+# tcpSocket：通过访问容器内特定端口，来判断容器是否可以正常工作
+# httpGet：通过向容器发送HTTP请求，根据HTTP状态码，判断容器是否可以正常工作
+# initialDelaySeconds：容器启动后等待多少秒执行第一次探测，默认立即探测
+# timeoutSeconds：探测超时时间，默认1秒，最少可设置1秒
+# failureThreshold：连续探测失败多少次，才被认定为失败，默认3次，最小可设置1次
+# periodSeconds：执行探测频率，默认是10秒探测一次，最小可设置1秒
+# successThreshold：连续探测成功多少次才被认定为成功，默认1次
+# 案例1：以liveness Probe存活探针，通过exec命令探测，在容器内执行命令，如果执行成功，则程序正常，否则不正常
+[root@master yml]# kubectl apply -f deploy-nginx-liveness.yml 
+# 案例2：以readiness Probe就绪探针为例，通过tcpSocket访问容器特定端口，来判断容器是否可以接收请求
+[root@master yml]# kubectl apply -f deploy-nginx-readiness-httpget.yml 
+
+## Pod重启策略
+# 当Pod中的容器一旦出现问题，k8s会对容器所在的pod进行重启，重启操作是由pod重启策略决定
+# pod的重启策略由三种，可通过 kubectl explain pod.spec.restartPolicy 查看：
+#   Always：容器异常时，自动重启该容器（默认策略）
+#   OnFailure：容器异常终止运行，自动重启该容器
+#   Never：无论容器状态如何，都不重启该容器
+# Tips：重启延时，首次立即重启，随后为10s、20s、40s、80s、160s、300s，最长延时为300s，以后重启延时均为300s，直至重启成功
+#       Pod重启策略仅用于init（初始化容器）可用，非初始化容器不可用
+
+# Pod更新策略
+# Deployment控制器支持两种Pod更新策略，通过strategy属性进行配置，可通过kubectl explain deploy.spec.strategy 查看：
+#   recreate：称为重建更新，首先停止所有旧的Pod，然后创建新的Pod
+#   RollingUpdate：称为滚动更新，逐步替换旧的Pod，以确保在更新过程中服务的持续可用性，也是默认策略
+# 案例1：通过Recreate对Pod进行重建更新
+[root@master yml]# kubectl apply -f deploy-nginx-strategy.yml 
+# 案例2：通过RollingUpdate对Pod进行滚动更新，可以通过以下属性控制Pod的更新数量
+#   maxunavailable：指定在升级过程中最多可停止的pod数量，默认为25%
+#   maxSurge：指定在升级过程中最多可新建的pod数量，默认为25%
+[root@master yml]# kubectl apply -f deploy-nginx-strategy-rolling.yml 
+# Tips：当pod滚动更新后，RS也会跟着更新，原有RS中的Pod会被删除，但是原有的RS并不会删除，用于版本回退
+
+## Pod版本回退
+# Deploy控制器支持滚动升级过程中的暂停、继续、回退等功能，具体功能如下：
+# 命令格式：kubectl rollout <command> [选项]
+#   status    显示当前升级状态
+#   history   显示升级历史记录
+#   pause     暂停升级过程
+#   resume    继续升级过程
+#   restart   重启升级过程
+#   undo      版本回退（可通过 --to-revision切换到指定版本）
+# 查看发布的版本信息
+kubectl rollout history deploy -n test
+# 查看某个版本的信息
+kubectl rollout history deploy --revision=4 -n test
+# 回退到指定版本
+kubectl rollout undo deploy --to-revision=3 -n test
+
+
+## DaemonSet控制器
+# DaemonSet（DS）控制器在功能方面与Deployment控制器几乎一样，默认是滚动更新、支持版本回退（不是通过RS实现的版本回退，内置版本回退功能）
+# 但DaemonSet适合部署系统级别的服务，如日志收集、节点监控、网络插件等
+# DaemonSet应用场景：
+#   每个节点只有一个Pod副本：
+#       DaemonSet确保每个节点上都运行一个Pod副本（如：日志收集、节点监控），当新的节点加入集群时，DaemonSet会自动创建并调度Pod到这个新节点上。相反，如果节点从集群中被移除，这个节点上的Pod将被删除
+#   支持Pod故障自动恢复：
+#       如果DaemonSet控制的Pod发生故障，它会自动重启Pod，如果Pod被删除，它会在节点重建新的Pod，以保证服务的可用性
+# Tips：不支持设置Pod副本数 
+# 案例1：通过DaemonSet控制器创建Pod，并保证在每个节点都运行
+[root@master yml]# kubectl apply -f ds-filebeat.yml 
+# 查看DaemonSet信息
+[root@master yml]# kubectl get ds -n test
+# 案例2:通过DaemonSet控制器创建Pod，并通过nodeSelector让Pod仅在master、node2节点运行
+#   节点打标签
+[root@master yml]# kubectl label node master node2 filebeat=logs
+# 查看标签
+[root@master yml]# kubectl get node master node2 --show-labels
+# 部署
+[root@master yml]# kubectl apply -f ds-filebeat-selector.yml 
+
+## HPA自动伸缩控制器
+# HPA（Horizontal Pod Autoscaler）控制器，可帮助Deployment或者StatefulSet控制器自动调整Pod副本数量，不需要人工干预
+# Metrics Server资源监控
+# Metrics Server是k8s的一个核心监控组件，用于收集和存储每个节点Pod的CPU和内存资源使用情况
+# 以下是Metrics Server的主要作用：
+# 资源监控：Metrics Server会周期性的收集每个节点和Pod的CPU、内存使用情况，并暂时存储在内存中
+# 自动伸缩：HPA根据Metrics Server提供的CPU利用率来决定是否需要增加或减少Pod的副本数，对于负载波动较大的应用非常有用
+# 测试HPA扩缩容
+# 1.查看pod信息
+kubectl get pod -n test -w
+# 2.通过压力测试工具
+dnf -y install httpd-tools
+# 3.访问pod进行压测，pod地址根据实际情况修改
+ab -n 600000 -c 1000 http://IP地址/index.html
+
+## 第五章 Service四层负载均衡
+# 在k8s集群中，由于Pod经常处于用后即焚状态，因此Pod对应的IP地址也会经常变化，导致无法直接访问Pod来提供服务
+# k8s使用了service来解决这一问题，即在pod前面使用service对pod进行代理，无论pod怎样变化，只要有label，就可以让service能够联系上pod，进而实现通过service访问pod目的
+# service本质上就是一条代理规则，真正实现代理功能的其实是kube-proxy组件，当创建service时，就等于创建了一条代理规则，然后kube-proxy负责在多个pod之间进行负载均衡
+#   当某个pod不可用时，kube-proxy会自动调整规则，将流量转发到其他可用的pod上
+# kube-proxy代理模式：
+# kube-proxy使用iptables和ipvs模式来处理服务的流量，iptables和ipvs都是linux中用于控制和管理网络流量的工具，iptables是一个防火墙应用程序，ipvs（ip virtual server）是Linux内核中的负载均衡模块
+# iptables代理模式：
+# 当一个service被创建时，kube-proxy会在每个节点上添加相应的iptables规则，这些规则将流量转发到后端的pod上，也会kube-proxy默认代理模式
+#   但随着节点和服务数量的增加，iptalbes规则会变越来越多，会对节点的性能产生一定的影响
+# 举例：如果一个集群创建2000个service，并且每个service有10个pod，那么就会在每个节点上有20000条iptables规则，而iptables在处理规则时，
+#       是按“链”从上到下逐条匹配，规则越多，查询速度就越慢，而且会大量消耗CPU资源
+# IPVS代理模式：
+# ipvs上Linux内核提供的高性能四层负载均衡技术，kube-proxy通过ipvs规则直接在内核中进行流量转发，特别是在处理大量流量时，ipvs具有更好的性能
+# 举例：在ipvs代理模式下，kube-proxy不会为每个service单独生成一条规则，它会生成一个ipvs表，表中记录着service的虚拟IP地址（VIP），以及service代理的后端Pod地址
+#   当有数据包到达VIP时，ipvs会根据预设的负载均衡算法将数据包转发给后端Pod，而不是像iptables那样需要为每个service配置一条规则。这样做的好处可以大大减少规则数量，提高性能和效率
+# 总结：iptables是为防火墙而设计的，虽然也能应用于路由转发等功能，但ipvs更聚焦，它只能负载均衡
+# 想要使用ipvs代理模式，需要安装ipvs模块
+[root@master ~]# lsmod |grep ip_vs 
+[root@master ~]# lsmod |grep -e ip_vs -e nf_conntrack_ipv4
+# 查看ipvs功能是否开启
+[root@master ~]# ipvsadm -Ln
+# 编辑kube-proxy的configMap资源，开启ipvs模式
+[root@master ~]# kubectl edit cm kube-proxy -n kube-system
+    mode: "ipvs"
+# 删除当前正在运行的kube-proxy的pod（按照标签删除）
+[root@master ~]# kubectl get pod --show-labels -n kube-system |grep kube-proxy
+[root@master ~]# kubectl delete pod -l k8s-app=kube-proxy -n kube-system
+# 查看kube-proxy的pod是否被重建
+[root@master ~]# kubectl get pod -n kube-system
+
+# service访问方式：
+# 当通过service访问pod时，可以通过不同的访问方式来暴露这些pod：
+#   ClusterIP：默认访问方式，分配一个集群内部可以访问的虚拟IP，该方式仅限集群内部使用，外部无法访问
+#   NodePort：在集群每个节点上暴露一个端口作为外部访问入口，客户端可以通过任何节点的IP地址和这个端口访问service，NodePort端口范围限制在30000-32767
+#   LoadBalancer：通过在集群外部的公有云平台上，如：阿里云，华为云，AWS等做一个负载均衡，通过外部负载均衡接收请求后，在将流量路由到集群中的NodePort上
+# ClusterIP应用案例：创建1个pod并通过ClusterIP方式在集群内部进行代理
+# 资源文档查询方法：kubectl explain svc
+# 参考地址：https://kubernetes.io/zh-cn/docs/concepts/services-networking/service
+ [root@master yml]# kubectl apply -f service-deploy-nginx.yml 
+# 查看service信息
+[root@master yml]# kubectl get svc -n test
+ # 查看service详细信息
+ [root@master yml]# kubectl describe svc nginx-svc -n test
+ # 通过tab工具，访问service地址，验证负载均衡
+ [root@master yml]# ab -n 600000 -c 1000 http://10.107.230.153/index.html
+
+ # NodePort应用案例
+ # 在生产环境中，service是需要暴露给外部访问的，那么就要用到NodePort类型，NodePort的工作原理其实就是在Node节点上暴露一个端口，
+ #   然后外部主机就可以通过节点：IP:NodePort端口来访问集群中的Pod 
+ # 案例：将前面案例中的ClusterIP改为NodePort类型，实现外部访问
+ [root@master yml]# kubectl apply -f service-nodePort-deploy-nginx.yml 
+ [root@master yml]# kubectl describe svc nginx-svc -n test
+
+ # LoadBalance应用案例
+ # LoadBalancer和Nodeport非常相似，目的都是向外暴露一个端口，区别在于loadbalancer使用外部的一个负载均衡来负载k8s中的pod
+ # 请求由外部LB通过匹配规则，转发到集群任意Node节点上，再通过service资源找到对应的pod，最终提供服务
+[部署MetalLB组件] 
+ # MetalLB负责为LoadBlancer类型的service分配IP地址，这个地址用于在集群内部与Pod通讯
+ # 1.下载Metal LB yaml文件
+ [root@master ~]# wget https://raw.githubusercontent.com/metallb/metallb/v0.9.3/manifests/metallb.yaml
+ # 2. 创建名称空间
+[root@master ~]# kubectl create ns metallb-system 
+# 3.为Metal LB创建一个密钥，用于在集群中安全运行和通信
+ # tips:secret名称memberlist不要改，应为metallb.yaml文件中已经定义好从该名称中获取密钥信息
+[root@master ~]# kubectl create secret generic -n metallb-system memberlist --from-literal=secretkey="$(openssl rand -base64 128)"
+# 安装nginx软件包
+[root@master ~]# dnf install nginx -y
+# 创建nginx代理配置文件
+
+## ConfigMap介绍
+# 在部署应用时，许多应用程序会从配置文件或环境变量中读取所需的配置信息，如果程序较多且分散在集群的不同节点上，那么更新配置就很麻烦
+# 所以k8s引入了Configmap资源对象，提供了向容器中注入配置信息的机制，让程序和配置文件解耦，以便实现配置的统一管理
+# 注：ConfigMap以键值对的形式保存一些非机密性数据，并不适合存储敏感信息，如密码、证书等。比较常见的使用方式是存储程序的配置文件，当需要对配置文件批量更新时，会更加方便
+# ConfigMap注意事项：
+#   ConfigMap需要在Pod启动前创建出来，并且只有当ConfigMap和Pod处于同一空间时，才可以被Pod引用
+#   ConfigMap在设计上不是用来保存大量数据的，在ConfigMap中保存的数据不可超过1M
+# ConfigMap案例：
+# 案例1:通过命令方式创建ConfigMap来存储Nginx虚拟Web主机配置文件
+[root@master yml]# kubectl apply -f nginx.conf.yml 
+[root@master yml]# kubectl apply -f configmap-deploy-nginx.yml 
+# Tips：ConfigMap挂载到容器目录时，如果该目录有其他文件，默认会覆盖目录下其他文件。可以通过subPath属性挂载，
+# subPath可以将configMap作为文件挂载到容器中而不是覆盖挂载目录下的文件
+
+
+## Secret介绍
+# Secret与ConfigMap类似，区别在于ConfigMap存储的数据是明文，而Secret存储的数据是密文。所以Secret用来存储和管理一些敏感数据，比如账号、密码、token、ssh密钥、证书等内容
+# Secret常用3种类型：
+#   Opaque：用来存储密码、密钥、需要通过base64编码格式进行编码
+#   docker-registry：用来存储私有仓库的认证信息
+#   tls：用来存储证书和私钥文件
+# 案例1:使用Qpaque类型来存储MySQL root密码
+[root@master ~]# echo -n 123456 | base64
+MTIzNDU2
+# Tips：echo -n 不换行输出，如果不使用-n，就会把换行符也作为字符当作密码使用，密码则无法使用
+# 创建secret
+[root@master ~]# kubectl apply -f secret-mysql.yml 
+# 查看secret信息
+[root@master yml]# kubectl get secret -n test
+# 创建pod
+[root@master yml]# kubectl apply -f secret-deploy-mysql.yml 
+# 进入容器验证密码是否可用
+[root@master yml]# kubectl exec -it mysql-858d8c4885-8xkfh -n test -- /bin/bash 
+# 查看MySQL环境变量
+bash-5.1# env
+bash-5.1# env |grep MYSQL_ROOT_PASSWORD       
+# 进入数据库
+bash-5.1# mysql -uroot -p123456
+# Secret更新
+# 将明文密码进行base64编码
+[root@master yml]# echo -n admin12345 | base64
+YWRtaW4xMjM0NQ==
+# 编辑secret
+[root@master yml]# kubectl edit secret secret-mysql -n test
+passwd: YWRtaW4xMjM0NQ==
+# 触发Pod滚动更新
+[root@master yml]# kubectl edit deploy mysql -n test
+template:                 # Pod模版（母版）用于定义Pod配置
+    metadata:               # Pod模版元数据（Pod元数据）
+      annotations:
+        update: 2025-12-24-15:27
+# 查看Pod信息
+[root@master yml]# kubectl get pod -n test
+# 进入容器验证密码是否可用
+[root@master yml]# kubectl exec -it -n test mysql-64949c5d75-frtzj /bin/bash
+# 查看MySQL环境变量
+bash-5.1# env
+bash-5.1# env |grep MYSQL_ROOT_PASSWORD       
+# 进入数据库
+bash-5.1# mysql -uroot -padmin123456
+ 
+
+## 第八章 k8s使用Harbor仓库
+# Harbor环境部署
+# harbor-db 
+# 添加阿里docker-ce仓库
+# 安装docker
+# 启动docker
+# 准备Docker compose
+#   1.下载docker-compose程序文件
+#   2.修改文件名称
+#   3.添加执行权限
+#   4.移动程序文件到/usr/local/bin目录
+#   5.查看docker-compose版本
+      docker-compose --version
+# 解压Harbor压缩包
+tar -xf harbor-v2.5.1.tgz
+cd harbor/
+# 准备Harbor配置文件，并修改文件内容
+mv harbor.yml.tmpl harbor.yml
+# 导入Harbor镜像文件
+docker load -i harbor.v2.5.1.tar.gz
+# 执行脚本安装
+./install.sh
+# 本机指定Harbor仓库地址
+# 修改/etc/docker/daemon.json文件，添加私有仓库地址
+{
+  "insecure-registries": ["http://172.16.96.110"]
+}
+# 重启docker生效
+systemctl restart docker
+# 重启Harbor
+docker-compose down && docker-compose up -d
+# 命令行登录Harbor仓库
+docker login 172.16.96.110
+
+# k8s配置Harbor仓库
+# 再集群每个节点修改配置文件/etc/containerd/config.toml，找到[plugins."io.containerd.grpc.v1.cri".registry]，在config_path中定义一个目录，目录可用于存放SSL/TLC证书（私有仓库证书）和其他认证文件
+[plugins."io.containerd.grpc.v1.cri".registry]
+config_path = "/etc/containerd/certs.d"
+# 创建目录，该目录是Harbor主机IP
+mkdir -p /etc/containerd/certs.d/172.16.96.110/
+# 在该目录下创建hosts.toml文件，在文件中定义镜像仓库地址
+[host."http://172.16.96.110"]
+  capabilities = ["pull","resolve","push"]
+  skip_verify = true 
+# 重启Containerd生效
+systemctl restart containerd 
+# 如果k8s集群使用的是docker，配置Harbor仓库方法：
+{
+  "insecure-registries": ["http://172.16.96.110"]
+}
+# 创建一个Docker registry类型的Secret用于存储Harbor仓库的信息
+# 参考:https://kubernetes.io/zh-cn/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line
+kubectl create secret docker-registry registry \
+  --docker-server=172.16.96.110 \
+  --docker-username=admin \
+  --docker-password=12345 \
+  --namespace=test
+# 查看Secret信息
+kubectl get secret -n test
+kubectl describe secret registry -n test
+# 创建Pod并使用Secret
+kubectl apply -f secret-service-nginx.yml
+# 查看镜像下载地址
+kubectl describe pod -n test
+
+## 第九章 K8S数据存储
+# 由于容器声明周期不稳定，可能随时被创建与销毁，如果容器被销毁后，在容器中产生的数据也会被清除，如果需要对容器内的数据实现持久化保存，需要将容器内的数据与pod分离，将数据放在专门的存储卷上
+# k8s支持的存储类型参考地址：https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/
+# 本地存储EmptyDir：是最基础的存储类型，一个EmptyDir就是主机上的一个空目录，该目录是在Pod被分配到Node节点时创建的，它的初始化内容为空，当Pod销毁时，EmptyDir中的数据也会被删除
+# 案例：创建Pod并使用emptydir作为数据的临时存储
+# 创建pod
+[root@master yml]# kubectl apply -f empty-deply-nginx.yml 
+# 查看pod
+[root@master pods]# kubectl get pod -n test -o wide 
+# 可通过find在pod所在节点中搜索存储卷目录所在位置
+[root@master pods]# find /var/lib/kubelet/pods/ -name nginx-logs
+# 删除pod验证存储卷目录是否存在
+[root@master pods]# find /var/lib/kubelet/pods/ -name nginx-logs
+# 总结：EmptyDir存储方式不会永久保存数据，应为EmptyDir的生命周期是根据Pod的生命周期是一样的，它会随着Pod的结束而销毁，如果想简单的将数据持久化到集群主机中，可以选择用HostPath
+
+# 本地存储HostPath
+# HostPath是将Node节点中一个实际目录挂载到Pod中，以供容器使用，这样的设计可以保证Pod销毁了，但是数据仍然可以保存在宿主机上，实际数据永久保存
+# 案例：创建Pod并使用HostPath存储卷
+# 关于hostPath:type 可用值说明：
+#   DirectoryOrCreate   目录存在就使用，不存在就先创建后使用
+#   Directory           目录必须存在
+#   FileOrCreate        文件存在就使用，不存在就先创建后使用
+#   File                文件必须存在
+# 创建Pod
+[root@master yml]# kubectl apply -f hostpath-deploy-nginx.yml 
+# 查看Pod信息
+[root@master yml]# kubectl get pod -n test -o wide
+# 查看Pod所在节点的hostPath目录
+[root@master yml]# ls /volume-nginx
+# 在存储卷目录创建一个文件验证是否同步到容器
+[root@master yml]# echo hello > /volume-nginx/html/index.html
+# 访问Pod验证
+[root@master yml]# curl Pod_IP
+# 删除Pod验证数据是否持久保存
+kubectl delete -f hostpath-deploy-nginx.yml 
+# 总结：HostPath可以解决数据持久化的问题，但是一旦Pod发生迁移，那么HostPath中的数据并不会转移到其他节点，为了解决以上问题，可以使用网络存储，比较常见的有NFS、chepfs等
+
+## 网络存储NFS
+# 以NFS为例，将Pod中数据存储到NFS上，这样无论Pod在集群中怎么转移，只要该节点跟NFS对接没问题，数据就可以成功访问
+# 在Harbor机器安装NFS
+# 安装NFS软件包
+[root@nfs ~]# dnf -y install nfs-utils
+# 创建共享目录
+[root@nfs ~]# mkdir -p /volume-k8s/nginx/html
+sudo chmod 755 /volume-k8s/nginx/html  # 基础权限
+sudo chown root:root /volume-k8s/nginx/html  # 若用no_root_squash，建议属主为root
+
+# 修改NFS文件，将目录共享给集群节点
+[root@nfs ~]# vi /etc/exports
+/volume-k8s/nginx/html 172.16.0.9/24(rw,no_root_squash)
+# 启动NFS服务
+[root@nfs ~]# systemctl enable nfs-server --now
+# 在集群节点上都安装NFS客户端，不需要启服务，这样集群节点才可以访问到NFS服务端
+[root@master yml]# dnf -y install nfs-utils
+[root@node1 ~]# dnf -y install nfs-utils
+[root@node2 ~]# dnf -y install nfs-utils
+# 查看NFS服务端共享资源
+[root@master yml]# showmount -e 172.16.96.100
+# 案例：创建Pod，并通过NFS存储数据
+ [root@master yml]# mkdir -p /usr/share/nginx/html
+ [root@master yml]# kubectl apply -f nfs-deply-nginx.yml 
+
+ ## PV与PVC存储卷
+ # 经过前面NFS存储已经可以实现数据的持久化保存，而K8S为了能够屏蔽底层的存储细节，方便用户使用，k8s引入了PV和PVC的存储方式
+ # 适合的应用场景：业务提交申请，需要多少容量的存储空间，然后存储通过PV与PVC提供相应的存储空间
+ # PV（Persistent Volume）
+ # PV后端需要通过hostPath、NFS、Ceph或云存储等，来提供真正的存储空间
+ # PVC（Persistent Volume Claim）
+ # PVC与PV进行绑定，绑定之后挂载PVC到容器中，就可以使用PV后端提供的存储资源
+ # 使用NFS作为后端存储，创建一个4G的PV存储卷
+ # NFS节点创建共享目录
+ mkdir /volume-k8s/mysql
+ # 共享目录
+ vi /etc/exports
+ /volume-k8s/mysql 172.16.0.0/24(rw,no_root_squash)
+ # 重启NFS
+[root@nfs ~]# systemctl restart nfs-server
+# 创建PV存储卷，PV是全局资源，无需指定命名空间
+
+accessModes(访问权限)包含以下几种方式：
+ReadWriteOnce(RWO)  # 读、写
+ReadOnlyMany(ROX)   # 读、执行
+ReadWriteMany(RWX)  # 读、写、执行
+
+PersistentVolumeReclaimPolicy(回收策略)当PV不再被PVC使用时，对PV内的数据处理方式：
+Retain(保留)    # 当PVC被删除时，PV中的数据不会被删除
+Delete(删除)    # 当PVC被删除时，与之关联的PV中的数据将被自动删除（如果发现策略没生效，那就手动删除PV目录的数据）
+# 创建PV
+[root@master yml]# kubectl apply -f pv-nginx.yml 
+# 创建PVC
+[root@master yml]# kubectl apply -f pvc-nginx.yml 
+# 查看PV信息
+[root@master yml]# kubectl get pv
+PVC的几种状态：
+Available(可用)     # 表示可用状态，还未被任何PVC绑定
+Bound(已绑定)       # 表示PV已经被PVC绑定
+Released(释放)      # PVC与PV解除绑定
+Failed(失败)        # 无法正常使用    
+# 创建PVC，并绑定mysql-pv存储卷，PVC是局部资源，需要指定名称空间
+# Tips：创建PV时，并不需要手动绑定某个具体的PV，PV和PVC之间的绑定通常是由k8s自动处理，控制器（如Deployment，StatefulSet等），
+# 会监视新创建的PVC，并根据其需求找到合适的PV，选择的依据包括PV的存储容量、访问模式等，是否与PVC的需求匹配
+
+动态存储StorageClass
+为什么需要动态存储？如果PVC申请较多时，k8s提供一种自动创建PV的机制StorageClass，当用户需要申请PVC时（例如10G），StorageClass会根据PVC申请的大小动态生成PV（10G）供PVC使用
+# 案例：基于NFS作为后端存储，通过StorageClass动态创建PV供PVC使用
+# NFS节点创建共享目录
+[root@nfs ~]# mkdir /storageclass
+[root@nfs ~]# vi /etc/exports
+/storageclass  172.16.0.0/16(rw,sync,no_root_squash,no_subtree_check)
+# 重启NFS
+[root@nfs ~]# systemctl restart nfs-server
+# 使用NFS作为后端存储，需要一个nfs-client-provisioner程序，nfs-client-provisioner的作用是监听StorageClass，并根据StorageClass的配置动态地创建PV，并将其挂载到指定的NFS目录
+
+第十章 StatefulSet控制器
+对于部署的应用，大体可以分为两类，一类是无状态应用，一类是有状态应用：
+无状态应用：像Nginx这类Web应用可称为无状态应用，不需要存储任何数据至本地，也没有任何启动顺序和主从角色之分，这类应用就可以
+      通过RS、Deployment、DaemonSet控制器来进行部署，他们所管理的Pod地址、名字、启动顺序都是随机的
+有状态应用：像MySQL这类需要存储数据的应用可称为有状态应用，他们有主从角色之分，又存在先后启动顺序，这类应用就可以通过StatefulSet控制器部署
+
+StatefulSet介绍
+在k8s中StatefulSet控制器用于管理油状态应用的控制器。他的主要特点如下：
+稳定的网络标识：StatefulSet管理的Pod拥有固定的名称，Pod名字称为网络标识，可以通过DNS查询来发现每个Pod（也叫服务发现）
+持久化存储：StatefulSet为每个Pod关联一个PV，实现数据的持久化，并且当Pod故障被重建后，依然会自动使用此前的PV保存数据
+有序部署和扩展：StatefulSet可以定义Pod先后顺序来部署和更新Pod。在扩展时，可以确保有序的扩展，且新生成的Pod名称与现有的Pod保持一致
+有序的缩容：StatefulSet缩减Pod时，它会按照与创建相反的顺序逐个删除其管理的Pod，这确保了有状态应用的有序关闭
+
+StatefulSet组成
+Headless Service（无头服务）：Headless Service给每个Pod分配一个唯一的DNS名称，用于定义Pod的网络标识。如果Pod重建，Pod地址是变化的，但是Pod名称是不变的，可直接通过Pod名称访问。
+VolumeClaimTemplate（存储卷模版）：statefulset通过存储卷模板为每个Pod生成不同的PVC并绑定PV来实现各Pod有专用存储，而不是共用同一个存储卷
+
+
+
+
+
+
+
+
+
+
+
+
+

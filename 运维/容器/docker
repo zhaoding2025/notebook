@@ -1,0 +1,257 @@
+## 1. 安装docker软件包
+# 下载阿里云docker-ce 仓库
+dnf install -y yum-utils && yum-config-manager --add-repo http://mirrors.aliyun.com/do
+# 可查看仓库中所有版本，按需安装
+dnf list --showduplicates docker-ce
+dnf install -y docker-ce-3:20.10.24-3.e19
+# 启动docker并设置随机自启
+systemctl enable docker --now
+# 卸载docker方式：删除安装包，删除镜像，容器、配置文件内容
+dnf remove docker-ce
+rm -rf /var/lib/docker
+
+## 2. 镜像常用管理命令
+docker images   列出本地所有镜像
+docker search <image>   从docker hub搜索镜像仓库
+docker pull <image>     从docker hub拉取镜像
+docker rmi <image>      删除一个镜像
+docker image inspect <image>    查看镜像的详细信息和元数据
+# 镜像导出 格式：docker save -o 压缩文件名称 镜像名称:版本号
+docker save -o wordpress-6.0.tar.gz wordpress:v6.0
+# 镜像导入方式 格式：docker load -i 压缩文件名称
+docker load -i wordpress-6.0.tar.gz
+# 容器导出为镜像  格式：docker commit 容器ID 新镜像:版本
+docker commit 590342feerw mysql:wordpress
+
+## 3.镜像加速
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json <<-'EOF'
+{
+    "registry-mirrors": ["https://docker.1ms.run",
+                          "https://docker.xuanyuan.me"
+                        ]
+}
+EOF
+# 重启docker生效
+systemctl restart docker
+## 4.容器常用管理命令
+docker run 选项...  创建容器
+docker ps           查看正在运行的容器
+docker ps -a        查看所有容器（包含关闭的容器）
+docker exec -it 容器名/容器ID   进入容器（正在运行的状态）
+docker stop 容器名/容器ID       停止容器
+docker start 容器名/容器ID      启动被停止的容器
+docker restart 容器名/容器ID    重启容器
+--restart=always              
+docker update       更新荣刚起配置
+docker logs 容器名/容器ID   查看容器日志信息
+docker cp 容器名:路径 本机目录  拷贝容器中的数据到宿主机
+docker cp 本机目录 容器名:路径 拷贝宿主机中的数据到容器中
+docker rm 容器名/容器ID     删除容器（-f 用于强制删除，无需关闭容器）
+docker kill 容器名/容器ID   强制停止正在运行的容器（一般不用，除非卡了）
+docker inspect 容器名称     查看容器的元数据信息
+docker info                查看docker信息
+
+
+## 4.容器管理
+#4.1 创建容器 docker run 选项...
+    常用选项：
+        -d      //创建容器并指定容器在后台运行
+        -it     //创建容器并直接进入到容器内部，一旦退出，容器关闭
+        --name="名称"    //为容器指定一个名称
+        -p      //指定端口映射，格式为：宿主机端口:容器端口
+[root@master ~]# docker run -d --name nginx01 nginx:1.27.0
+[root@master ~]# docker run -d --name nginx02 -p 82:80 nginx:1.27.0
+
+## 容器数据卷
+# 数据卷可以解决容器删除后容器数据丢失的问题，实现数据持久化
+# 一个数据卷目录可以同时挂载多个容器，解决多容器之间文件数据同步问题
+[root@master ~]# docker run -d --name=nginx03 -p 83:80 -v /root/volume-nginx/logs:/var/log/nginx -v /root/volume-nginx/html:/usr/share/nginx/data nginx:1.27.0
+
+
+## 5.mysql 8.0部署
+# 创建mysql容器并挂载数据卷
+    -v  // 宿主机目录/文件:容器中目录/文件
+    -e. // 指定环境变了
+Tips：目录必须指定绝对路径，如果目录不存在，会自动创建
+[root@master ～]# docker pull mysql:8.0
+[root@master ~]# docker run -d --name=wp-mysql -p 3306:3306 -v /mysql-volume/data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=Admin123 -e MYSQL_DATABASE=wp mysql:8.0
+
+
+## 6.DockerFile定制镜像
+# DockerFIle常用指令
+From    定义基础镜像
+label   定义镜像元数据，例如：版本、作者、邮箱等信息
+run     构建镜像时运行的命令
+add     添加文件或目录到镜像中，可以是本地文件，也可以是url，如果添加.gz格式压缩包，会自动解压
+copy    拷贝文件或目录到镜像中，只能拷贝当前路径下的文件，且不支持解压功能
+expose  指定容器运行后监听的端口，协议默认TCP
+ENV     设置容器内环境变量
+cmd     启动容器时执行的shell命令，在dockerfile中只能有一条cmd指令。如果设置了多条cmd，只有最后一条会生效
+workdir 为run\cmd\copy\and设置工作目录
+volume  定义容器数据卷
+
+[root@master ~]# vi dockerfile
+[root@master mysql]# docker build -f dockerfile -t wp-mysql:8.0 .
+[root@master mysql]# docker run -d --name=wp-mysql -p 3306:3306 -v /mysql-volume/data:/var/lib/mysql wp-mysql:8.0
+
+## 案例：制作WordPress镜像
+# 下载wordpress项目包
+[root@master ~]# wget https://cn.wordpress.org/wordpress-6.0-zh_CN.tar.gz
+[root@master ~]# tar -xf wordpress-6.0-zh_CN.tar.gz 
+[root@master ~]# cd wordpress/
+[root@master wordpress]# mv wp-config-sample.php wp-config.php
+
+[root@master wordpress]# dnf list --showduplicates nginx
+
+
+
+
+
+Containerd安装方式：
+下载阿里云docker-ce仓库安装containerd软件包
+dnf install -y yum-utils
+wget -O /etc/yum.repos.d/docker-ce.repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+2.查看yum源中containerd软件版本
+yum list | grep containerd
+3.安装containerd的
+yum -y install containerd.io
+4.查看containerd的版本信息
+[root@elk91 ~]# rpm -qa | grep containerd
+[root@elk91 ~]# ctr --version 
+5.设置containerd开机自启动
+[root@elk91 ~]# systemctl enable --now containerd
+[root@elk91 ~]# systemctl status containerd
+6.查看containerd的客户端和服务端的版本信息
+[root@elk91 ~]# ctr version 
+# 生成containerd配置文件
+[root@nfs harbor]# containerd config default |tee /etc/containerd/config.toml
+# containerd配置加速器
+# 修改配置文件/etc/containerd/config.toml，找到[plugins."io.containerd.grpc.v1.cri".registry]，在config_path中定义一个目录，目录可用于存放私有仓库证书和其他认证
+[plugins.'io.containerd.grpc.v1.cri'.registry]
+      config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'
+# 在该目录下创建存放仓库认证文件的目录
+mkdir -p /etc/containerd/certs.d/docker.io
+# 在该目录下创建一个hosts.toml文件，在文件中定义镜像加速器
+[host."https://docker.1ms.run"]
+    capabilities = ["pull","resolve","push"]
+    skip_verify = true
+# 启动containerd
+systemctl enable containerd --now
+# 下载nerdctl工具（containerd容器及镜像管理工具）
+# 解压到/usr/local/bin目录
+[root@nfs demo]# tar -xf nerdctl-2.2.1-linux-arm64.tar.gz -C /usr/local/bin/
+# 查看nerdctl版本
+[root@nfs demo]# nerdctl -v
+
+# Containerd管理镜像
+# 单机版containerd可使用crt和nerdctl命令管理容器和镜像，k8s中containerd可使用k8s提供的crictl命令管理容器镜像
+# nerdctl 镜像管理常用命令：
+nerdctl images      查看镜像
+nerdctl pull        拉取镜像
+nerdctl rmi         删除镜像 
+nerdctl inspect     查看镜像元数据
+nerdctl tag         修改镜像标签
+nerdctl save        保存镜像为压缩包
+nerdctl load        导入镜像 
+nerdctl push        上传镜像
+# 拉取nginx镜像
+nerdctl pull nginx:1.27.0
+# 查看镜像信息
+[root@nfs ~]# nerdctl images
+# 查看镜像元数据信息
+[root@nfs ~]# nerdctl inspect nginx:1.27.0
+# 修改镜像标签
+[root@nfs ~]# nerdctl tag nginx:1.27.0 nginx-test:1.27.0
+# 保存镜像为压缩包
+[root@nfs ~]# nerdctl save -o nginx1.27.0-img.tar nginx:1.27.0
+# 删除镜像
+[root@nfs ~]# nerdctl rmi nginx:1.27.0
+# 导入镜像
+[root@nfs ~]# nerdctl load -i nginx1.27.0-img.tar 
+
+## Containerd管理容器
+# containerd自身不具备为容器提供网络的能力，默认containerd创建的容器仅有IO网络，如果容器需要配置网络，需要结合CNI（contaner network interface）
+# 插件为容器配置网络。或者也可以让容器共享主机的网络
+# CNI仓库：https://github.com/containernetworking/plugins
+# 下载CNI插件压缩包
+[root@nfs demo]# wget https://github.com/containernetworking/plugins/releases/download/v1.5.1/cni-plugins-linux-arm64-v1.5.1.tgz
+# 解压到/opt/cni/bin目录，该目录再config.toml文件中定义好
+[root@nfs demo]# mkdir -p /opt/cni/bin
+[root@nfs demo]# tar -xf cni-plugins-linux-arm64-v1.5.1.tgz -C /opt/cni/bin/
+# 查看
+[root@nfs demo]# tar -tf cni-plugins-linux-arm64-v1.5.1.tgz 
+# nerdctl容器管理常用命令
+nerdctl ps              显示创建的容器（支持-a选项）
+nerdctl run 选项..      创建容器
+nerdctl start           启动容器
+nerdctl stop            停止容器
+nerdctl restart         重启容器
+nerdctl exec -it        进入容器
+nerdctl rm              删除容器（支持-f选项）
+nerdctl logs            查看容器日志
+# 启动容器
+[root@nfs ~]# nerdctl run -d --name nginx -p 80:80 nginx:1.27.0
+
+# 若报runc错误执行下面命令
+[root@nfs ~]# file /usr/local/sbin/runc
+[root@nfs ~]# mv /usr/local/sbin/runc /usr/local/sbin/runc.bak
+# 进入容器
+[root@nfs ~]# nerdctl exec -it nginx /bin/bash
+
+# 创建Nginx容器，并挂载数据卷
+#1.提前创建数据卷目录，containerd无法自动创建目录
+[root@nfs ~]# mkdir -p /volume-nginx/logs
+#2.创建容器时不支持-id结合使用
+[root@nfs ~]# nerdctl run -d --name=nginx -p 80:80 -v /volume-nginx/logs:/var/log/nginx nginx:1.27.0
+# 查看容器信息
+[root@nfs ~]# nerdctl ps
+# 查看容器日志
+[root@nfs ~]# nerdctl logs nginx
+# 访问容器
+http://172.16.96.100
+# 进入容器
+[root@nfs ~]# nerdctl exec -it nginx /bin/bash
+# 停止容器
+[root@nfs ~]# nerdctl stop nginx 
+# 删除容器
+[root@nfs ~]# nerdctl rm nginx 
+
+## Containerd名称空间管理
+# 名称空间namespace用于在同一主机中将容器、镜像等进行隔离，防止发生冲突。可以为每个项目或应用程序创建一个单独的名称空间，避免管理混乱
+# 管理命令
+nerdctl namespaces ls       # 列出所有工作空间
+nerdctl namespaces create   # 创建新工作空间
+nerdctl namespaces remove   # 删除指定工作空间
+# 拉取镜像到空间
+nerdctl -n k8s.io pull nginx:1.27.0
+# 在k8s.io空间下启动容器
+nerdctl -n k8s.io run -d --name nginx01 nginx:1.27.0
+# 查看空间下的容器及镜像
+nerdctl -n k8s.io ps
+nerdctl -n k8s.io images
+# 停止空间下的容器
+nerdctl -n k8s.io stop nginx01
+# 删除空间下的容器
+nerdctl -n k8s.io rm nginx01
+# 给镜像打标签 
+nerdctl -n k8s.io tag xxx nginx:v1
+# 删除命名空间方式（需要提前清理容器和镜像）
+nerdctl ns rm k8s.io
+
+## containerd使用harbor仓库
+# 修改配置文件/etc/containerd/config.toml，找到[plugins."io.containerd.grpc.v1.cri".registry]，在config_path中定义一个目录，目录可用于存放SSL/TLS证书（私有仓库证书）和其他认证证书
+[plugins.'io.containerd.grpc.v1.cri'.registry]
+      config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'
+# 创建目录，该目录是harbor主机IP
+mkdir -p /etc/containerd/certs.d/172.17.96.100
+# 在该目录下创建hosts.toml文件，在文件中定义镜像仓库地址
+[host."http://172.16.96.100"]
+    capabilities = ["pull","resolve","push"]
+
+
+
+
+
+
+export DOCKER_API_VERSION=1.41

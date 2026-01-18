@@ -1,0 +1,64 @@
+
+报错解决方案：
+1、ERROR: Error response from daemon: client version 1.52 is too new. Maximum supported API version is 1.41
+[root@master ~]# export DOCKER_API_VERSION=1.
+# 临时生效（仅当前终端会话）
+export DOCKER_API_VERSION=1.41
+
+# 执行原 Docker 命令（如拉取镜像/运行容器），示例：
+docker pull pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+docker run -it --rm pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+
+# 若需永久生效（所有终端），将环境变量写入配置文件：
+# Linux/macOS 写入 ~/.bashrc 或 ~/.zshrc
+echo "export DOCKER_API_VERSION=1.41" >> ~/.bashrc
+source ~/.bashrc  # 生效配置
+
+# Windows PowerShell 写入配置文件
+echo '$env:DOCKER_API_VERSION = "1.41"' >> $PROFILE
+. $PROFILE  # 生效配置
+
+
+2.bird: BGP: Unexpected connect from unknown address 172.16.96.134 (port 35299)
+# 1. 检查集群内节点 IP 是否包含 172.16.96.134
+kubectl get nodes -o wide | grep 172.16.96.134
+# 2. 检查 Calico 节点的 Pod IP/主机 IP（确认是否为集群内设备）
+kubectl get pods -n kube-system -o wide | grep calico-node
+kubectl exec -it -n kube-system <任意calico-node-pod名> -c calico-node -- ip a  # 查看节点网卡 IP
+# 3. 若为集群外 IP：检查节点防火墙，拦截该 IP 的 179 端口（BGP 端口）
+sudo iptables -A INPUT -s 172.16.96.134 -p tcp --dport 179 -j DROP
+# 1. 创建/修改 BGP Peer 配置，添加 172.16.96.134 为合法对等体
+cat <<EOF | kubectl apply -f -
+apiVersion: crd.projectcalico.org/v1
+kind: BGPPeer
+metadata:
+  name: peer-172.16.96.134
+  namespace: kube-system
+spec:
+  peerIP: 172.16.96.134
+  asNumber: 64512  # 需与 Calico 集群 AS 号一致（默认 64512，可通过 calicoctl get bgpconfig 查看）
+  nodeSelector: all()  # 所有 Calico 节点都与该 Peer 建立连接
+  # 若有 BGP 认证，添加 password 字段（需与对等体一致）
+  # password: "your-bgp-password"
+EOF
+# 2. 验证 BGP Peer 配置是否生效
+kubectl get bgppeers -n kube-system
+# 3. 重启 Calico node Pod，触发 BGP 连接重建
+kubectl delete pods -n kube-system -l k8s-app=calico-node
+
+3. node重新加入流程
+kubeadm reset
+kubeadm join 172.16.96.134:6443 --token abcdef.0123456789abcdef \
+        --discovery-token-ca-cert-hash sha256:544ef6149b6118dce81e2213644684ea9360a191f5875092f859e68d4fcb927b 
+
+
+4. Unable to connect to the server: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" 
+while trying to verify candidate authority certificate "kubernetes")
+[root@master1 ~]# rm -rf .kube/
+[root@master1 ~]# sudo mkdir ~/.kube
+[root@master1 ~]# sudo cp /etc/kubernetes/admin.conf ~/.kube/
+
+[root@master1 ~]# cd ~/.kube
+[root@master1 .kube]# sudo mv admin.conf config
+[root@master1 .kube]# sudo service kubelet restart
+Redirecting to /bin/systemctl restart kubelet.service

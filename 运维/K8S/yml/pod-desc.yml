@@ -1,0 +1,43 @@
+apiVersion:               # 必选的一级属性，定义Pod版本
+kind:                     # 必选的一级属性，指定资源类型
+metadata:                 # 必选的一级属性，定义资源元数据（如名称）
+  name:                   # Pod名称
+  namespace:              # Pod运行的名称空间，默认为default空间
+  labels:                 # 定义Pod标签
+    kind: value           # 标签名称
+spec:                     # 必选的一级属性，定义Pod详细配置
+  containers:             # Pod中容器列表
+  - name:                 # 容器名称
+    image:                # 容器镜像名称
+    imagePullPolicy:      # 镜像的拉取策略
+    command:              # 指定容器启动时执行的命令，command
+    args:                 # 指定容器启动时执行的命令，args
+    volumeMounts:         # 挂载存储卷到容器
+    - name:               # 指定要挂载的存储卷名称
+      mountPath:          # 存储卷挂载到容器的绝对路径
+      readOnly:           # 是否以只读模式挂载，避免被容器内部程序
+    ports:                # 容器暴漏的端口列表
+    - name:               # 端口名称
+      containerPort:      # 容器需要监听的端口号
+      hostPort:           # 容器所在的主机需要监听的端口号
+      protocol:           # 端口协议，支持TCP/UDP，默认TCP
+    env:                  # 定义容器中的环境变量列表
+    - name:               # 变量名称
+      value:              # 变量的值
+    resources:            # 定义容器资源限制
+      limits:             # 容器可使用的资源上限
+        CPU:              # CPU资源，单位为core数
+        memory:           # 内存资源，单位为Mib/Gib
+      requests:           # 容器所需的资源下限
+        CPU:              # CPU资源
+        memory:           # 内存资源
+    lifecycle:            # 容器在其生命周期中的钩子
+      postStart:          # 容器创建后立即执行钩子中的命令
+      preStop:            # 容器终止前执行钩子中的命令
+    livenessProbe:        # 对容器做探测检查，当探测容器无响应后
+      tcpSocket:          # 探测容器中的特定端口
+      exec:               # 通过在容器中执行命令探测，判断容器
+        command:          # 要执行的命令
+      httpGet:            # 通过向容器发送http请求
+      initialDelaySeconds:  # 容器启动完成后，首次探测时间
+      
