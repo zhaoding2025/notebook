@@ -1,0 +1,10 @@
+
+sudo netplan apply
+
+sudo systemctl restart systemd-networkd
+
+sudo hostnamectl set-hostname node1
+
+
+
+sudo kubeadm init --control-plane-endpoint=172.16.96.128
