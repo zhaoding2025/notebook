@@ -1,0 +1,178 @@
+superset知识点
+一、入门
+概述：
+    Apache Superset是一个现代的数据探索和可视化平台。
+
+二、安装Minicanda
+    superset官网：http://superset.apache.org/
+    2.1 安装python环境
+        要求python3.9及以上版本
+    2.1.1 安装Miniconda
+        conda是一个开源的包、环境管理器，可以用于在同一个机器上安装不同的python版本的软件包及其依赖，并能够在不同的python环境之间切换
+        Anaconda包括conda、python以及一大堆安装好的工具包，比如：numpy，pandas等，miniconda包括conda，python
+        1.下载miniconda（python3版本）
+        下载地址：
+                https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh
+        2.安装miniconda
+            执行命令安装:
+                [root@nfs superset]# bash Miniconda3-latest-Linux-aarch64.sh 
+            指定安装路径：
+                [/root/miniconda3] >>> /opt/module/miniconda3
+            安装完成：
+                Thank you for installing Miniconda3!
+        3.加载环境变量配置文件，使之生效
+            [root@nfs superset]# source ~/.bashrc 
+    2.2 创建Python3.9环境
+        1.配置conda国内镜像
+            (base) [root@nfs superset]# conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free
+            (base) [root@nfs superset]# conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+            (base) [root@nfs superset]# conda config --set show_channel_urls yes
+        2.创建python3.9环境
+            (base) [root@nfs superset]# conda create --name superset python=3.9
+        conda环境管理常用命令：
+            创建环境：conda create -n env_name
+            查看所有环境：conda info --envs
+            删除一个环境：conda remove -n env_name --all
+        3.激活superset环境
+            conda activate superset
+          退出当前环境
+            conda deactivate
+        4.执行python -V查看python版本
+            python -V
+三、Superset部署
+    3.1安装依赖
+        安装所需依赖：
+        (superset) [root@nfs superset]# sudo yum -y install gcc gcc-c++ libffi-devel python-devel python-pip python-wheel openssl-devel cyrus-sasl-devel openldap-devel                                                                               
+
+    3.2安装superset
+        更新pip:
+            (superset) [root@nfs superset]# pip install --upgrade setuptools pip
+        安装superset:
+            (superset) [root@nfs superset]# pip install apache-superset
+
+    3.3配置superset元数据库
+        superset的元数据支持mysql、postgreSQL，此处采用MySQL
+        1.在mysql中创建superset元数据库
+            mysql> create database superset default character set utf8 default collate utf8_general_ci;
+        2.在mysql中创建用户并授权
+            mysql> create user 'superset'@'%' identified with mysql_native_password by 'Superset!2026';
+            mysql> grant all privileges on *.* to 'superset'@'%';
+            mysql> flush privileges;
+        3.修改superset配置文件
+            (superset) [root@nfs superset]# vi /opt/module/miniconda3/envs/superset/lib/python3.9/site-packages/superset/config.py 
+            插入如下内容：
+             196 SQLALCHEMY_DATABASE_URI = 'mysql://superset:Superset!2026@nfs:3306/superset?charset=utf8'
+        4.安装python mysql驱动
+            (superset) [root@nfs superset]# conda install mysqlclient
+        5.初始化superset元数据
+            (superset) [root@nfs superset]# export FLASK_APP=superset
+            (superset) [root@nfs superset]# superset db upgrade
+          如果有“SECRET_KEY”报错，执行如下操作：
+            (superset) [root@nfs superset]# export SUPERSET_SECRET_KEY="oh-so-secret"
+    3.4 superset初始化
+        1.创建管理员用户
+            (superset) [root@nfs superset]# superset fab create-admin
+            admin 000000
+        2.初始化superset
+            (superset) [root@nfs superset]# superset init
+    3.5 启动superset
+        1.安装gunicorn
+            (superset) [root@nfs superset]# pip install gunicorn -i https://pypi.douban.com/simple/
+          说明：gunicorn是一个python web server，可以和java中的tomcat类比
+        2.启动superset
+            确保当前conda环境为superset
+            启动
+                (superset) [root@nfs superset]# gunicorn --workers 5 --timeout 120 --bind 172.16.96.100:8787 "superset.app:create_app()" --daemon
+            说明：--workers：指定进程个数
+                 --timeout：worker进程超时时间，超时会自动重启
+                 --bind：绑定本机地址，即为superset访问地址
+                 --daemon：后台运行
+            登录superset
+                访问http://172.16.96.100:8787，并使用创建的管理员账号进行登录
+            停止superset
+                停掉gunicorn进程：
+                    ps -ef |awk '/superset/&& !/awk/{print $2}' | xargs kill -9
+                退出superset环境
+                    conda deactivate
+        3.superset启动脚本
+            创建superset.sh文件
+                (superset) [root@nfs superset]# vi superset.sh
+            加执行权限
+                (superset) [root@nfs superset]# chmod +x superset.sh 
+            测试
+                启动superset
+                (superset) [root@nfs superset]# ./superset.sh start
+                停止superset
+                (superset) [root@nfs superset]# ./superset.sh stop
+
+        4.测试
+            退出：
+                (superset) [root@nfs superset]# conda deactivate
+                (base) [root@nfs superset]# ./superset.sh status
+                superset 正在运行
+            停止 Superset
+                (base) [root@nfs superset]# ./superset.sh stop
+                (base) [root@nfs superset]# ./superset.sh status
+                superset 未在运行
+            启动 Superset
+                (base) [root@nfs superset]# ./superset.sh start
+                (base) [root@nfs superset]# ./superset.sh status
+                superset 正在运行
+
+MySQL数据库安装
+    1.更新系统
+        [root@nfs ~]# sudo dnf update
+    2.安装mysql-server包
+        [root@nfs ~]# sudo dnf install mysql-server -y
+    3.安装完成，查看版本
+        [root@nfs ~]# mysql --version
+    4.启动并启用MySQL Server
+        [root@nfs ~]# sudo systemctl start mysqld.service
+    5.确认服务状态
+        [root@nfs ~]# sudo systemctl status mysqld.service
+    6.设置服务在引导时启动
+        [root@nfs ~]# sudo systemctl enable mysqld
+    7.安全设置
+        [root@nfs ~]# sudo mysql_secure_installation
+        Y Y Y Y
+    8.查询统计信息
+        $ mysqladmin -u root -p version
+
+
+
+root 000000
+superset  Superset!2026
+
+
+
+
+
+
+报错及解决方案：
+1、(superset) [root@nfs superset]# superset db upgrade
+/opt/module/miniconda3/envs/superset/lib/python3.9/site-packages/superset/config.py:42: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2026-01-20 06:34:03,043:INFO:superset.initialization:Setting database isolation level to READ COMMITTED
+2026-01-20 06:34:03,072:ERROR:flask_appbuilder.security.sqla.manager:DB Creation and initialization failed: (MySQLdb.OperationalError) (2059, "Authentication plugin 'mysql_native_password' cannot be loaded: /opt/module/miniconda3/envs/superset/lib/plugin/mysql_native_password.so: cannot open shared object file: No such file or directory")
+(Background on this error at: https://sqlalche.me/e/14/e3q8)
+
+解决方法：
+1.(superset) [root@nfs superset]# pip install pymysql
+2.(superset) [root@nfs superset]# vi /opt/module/miniconda3/envs/superset/lib/python3.9/site-packages/superset/config.py 
+SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://superset:Superset!2026@172.16.96.100:3306/superset?charset=utf8'
+3.(superset) [root@nfs superset]# python -c "
+import pymysql
+conn = pymysql.connect(
+    host='172.16.96.100',
+    port=3306,
+    user='superset',
+    password='Superset!2026',
+    db='superset'
+)
+print('连接成功！')
+conn.close()
+"
+连接成功！
+(superset) [root@nfs superset]# superset db upgrade
+
+
