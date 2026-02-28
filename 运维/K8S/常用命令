@@ -1,0 +1,366 @@
+基本命令
+# create
+kubectl create -f ./nginx.yaml   # 创建资源
+kubectl create -f .              # 创建当前目录下的所有yaml资源
+kubectl create -f ./nginx1.yaml -f ./mysql2.yaml     # 使用多个文件创建资源
+kubectl create -f ./dir          # 使用目录下的所有清单文件来创建资源
+kubectl create -f xxx.git.io/vxxzso.yaml    # 使用 url 来创建资源
+
+
+# run
+kubectl run -i --tty busybox --image=busybox    # 创建带有终端的pod
+kubectl run nginx --image=nginx                 # 启动一个 nginx 实例
+kubectl run mybusybox --image=busybox --replicas=5 # 启动多个pod实例
+
+
+# explain
+kubectl explain pods,svc    # 获取 pod 和 svc 的文档
+
+
+# get
+kubectl get nodes   # 查看nodes节点
+kubectl get -f xxx.yaml     # 通过yaml文件查询资源
+kubectl get resourcequota   # 查询资源
+kubectl get endpoints       # 查询endpoints
+kubectl get po -n kube-system   # 查看指定空间kube-system的pods
+kubectl get pods -o wide --all-namespaces   # 查看所有空间的pods的详细信息
+kubectl get pod -o wide --namespace=kube-system    # 查看指定空间kube-system的pods的详细信息
+kubectl get namespaces
+kubectl get namespaces kube-system -o yaml  # 获取指定namespace的yaml格式和json格式信息
+kubectl get namespaces kube-system -o json
+kubectl get svc --all-namespaces            # 查看所有命令空间的service
+kubectl get services --all-namespaces       # 查看所有命令空间的service的其他写法
+kubectl get service -o yaml > backup.yaml   # 通过 yaml 方式导出所有 service
+kubectl get service serviceName -o yaml > backup.yaml   # 通过 yaml 方式导出单个 service
+kubectl get events --all-namespaces         # 查询事件(Event)
+kubectl get events -n kube-system           # 查看某个命名空间下的事件
+kubectl get events -n kube-system | grep “name”      # 查看某个命名空间下的事件，并根据关键字过滤
+kubectl get pods -l app=nginx -o yaml|grep podIP    # 通过lable查询
+kubectl get pods -L apps,run    # 查看所有pod对于指定标签的key是否有value，有则显示，没有则空白
+kubectl get pods -l apps --show-labels  # 获取含有指定标签key的pod
+kubectl get pods -l release=stable --show-labels    # 获取含有指定标签key=value的pod
+
+
+# edit
+kubectl edit svc/docker-registry        # 在服务端编辑资源，编辑名为 docker-registry 的 service
+
+
+
+# delete
+kubectl delete -f ./pod.json                  # 根据文件、标准输入（stdin）、资源名或者资源标签删除资源。删除 pod.json 文件中定义的类型和名称的pod
+kubectl delete pod,service baz foo                                      # 删除名为“baz”的 pod 和名为“foo”的 service
+kubectl delete pods,services -l name=myLabel                            # 删除具有 name=myLabel 标签的 pod 和 serivce
+kubectl delete pods,services -l name=myLabel --include-uninitialized    # 删除具有 name=myLabel 标签的 pod 和 service，包括尚未初始化的
+kubectl -n my-ns delete po,svc --all                                    # 删除 my-ns 命名空间下的所有 pod 和 serivce，包括尚未初始化的
+kubectl delete pods prometheus-7fcfcb9f89-qkkf7 --grace-period=0 --force    # 强制删除pod(如，prometheus-7fcfcb9f89-qkkf7)
+kubectl delete pod <pod-name> -n <命名空间> --force --grace-period=0     # 强制删除pod 核心命令：--force 强制删除，--grace-period=0 跳过优雅退出等待
+
+
+# cp
+容器内与宿主机之间进行文件拷贝
+kubectl cp default/venus-registry-web-8cd94fc99-fws4b:demo.txt demo.txt     # 拷贝容器内的文件或目录到本地
+kubectl cp default/venus-registry-web-8cd94fc99-fws4b:/home/xxx /home/yyy
+kubectl cp demo.txt default/venus-registry-web-8cd94fc99-fws4b:demo.txt        # 拷贝本地文件或目录到容器内
+kubectl cp /home/yyy default/venus-registry-web-8cd94fc99-fws4b:/home/xxx
+
+
+# rollout
+kubectl rollout history deployment nginx-deployment         # 查看修订版本（revison）的历史记录
+kubectl rollout undo deployment nginx-deployment --to-revision=1    # 回退到指定的某个版本,如果不加–to-revision=版本号，默认情况下，回退到上一个版本。
+
+
+
+# scale
+程序在负载加重或缩小时副本进行扩容或缩小。
+kubectl scale rc rc-nginx-3 —replicas=4     # 扩展副本数到4
+kubectl scale rc rc-nginx-3 —replicas=2     # 重新缩减副本数到2
+
+
+# autoscale
+scale虽然能够很方便的对副本数进行扩展或缩小，但是仍然需要人工介入，不能实时自动的根据系统负载对副本数进行扩、缩容。
+autoscale命令提供了自动根据pod负载对其副本进行扩缩的功能。
+autoscale命令会给一个rc指定一个副本数的范围，在实际运行中根据pod中运行的程序的负载自动在指定的范围内对pod进行扩容或缩容。
+kubectl autoscale rc rc-nginx-3 —min=1 —max=4   # 如前面创建的nginx，可以用如下命令指定副本范围在1~4。
+
+
+# cluster-info
+集群管理命令
+kubectl cluster-info    # 查看集群信息
+kubectl cluster-info dump   # 查看更详细的集群信息
+
+
+# top
+显示CPU、内存、存储资源的使用情况。
+kubectl top node k8s-node   # 显示节点（k8s-node）资源的使用情况
+kubectl top node            # 显示集群所有节点的资源的使用情况
+kubectl top pod -n logging  # 显示指定命名空间（如，logging）的pod的资源的使用情况
+
+
+
+# cordon
+标记节点不可调度。
+kubectl cordon k8s-node     # 标记k8s-node节点不可调度
+
+
+
+# uncordon
+标记节点可调度。
+kubectl uncordon k8s-node   # 标记k8s-node节点可调度
+
+
+# drain
+排除某节点，准备进行维护
+kubectl drain k8s-node      # 排除k8s-node节点，准备进行维护
+
+
+
+# describe
+故障排查和诊断命令：显示特定资源或资源组的详细信息。
+kubectl describe pod xxx    # 当我们发现一个pod迟迟无法创建时，展示一个pod的描述
+kubectl describe nodes      # 显示集群节点资源（CPU/GPU/内存）的使用情况。
+kubectl describe node node-work-2   # 显示集群具体某个节点（如，node-work-2）资源的使用情况。
+
+
+
+# logs
+打印Pod中一个容器的日志。
+kubectl logs -f kube-dns-699984412-vz1q6 -n kube-system     # 查看指定Pod的日志
+kubectl logs --tail=10 nginx                                # 查看指定pod的最后10行日志
+kubectl logs kube-dns-699984412-n5zkz -c kubedns --namespace=kube-system    # 指定Pod的其中一个容器查看日志
+kubectl logs -f --tail=10 kube-dns-699984412-vz1q6 -c manager -n kube-system    # 查看指定Pod指定容器的最后10行的滚动日志
+
+
+# exec
+exec命令同样类似于docker的exec命令，为在一个已经运行的容器中执行一条shell命令，如果一个pod容器中，有多个容器，需要使用-c选项指定容器。
+注意： shell命令前，要加--号，不然shell命令中的参数，不能识别
+kubectl exec -it codeleak-github-cron-1567581840-zsqpc /bin/bash        # 进入容器
+kubectl exec nginx-pod -n ns – ls /                               # 在指定命名空间(如，ns)已存在的容器中执行命令（只有一个容器的情况下）
+kubectl exec nginx-pod -c my-container – ls /                  # 在已存在的容器中执行命令（pod 中有多个容器的情况下，需要指定具体那个容器）
+
+
+
+# apply
+按文件名或标准输入（stdin）将配置应用于资源
+kubectl apply -f rc-nginx.yaml      # 更新资源
+cat pod.json | kubectl apply -f -   # 将控制台输入的JSON配置应用到Pod
+
+
+
+
+# label
+设置命令
+更新（增加、修改或删除）资源上的标签。
+如果–overwrite 为 true，则可以覆盖已有的 label，否则尝试覆盖 label 将会报错。
+如果指定了–resource-version，则更新将使用此资源版本，否则将使用现有的资源版本。
+Label命名规范：
+label 必须以字母或数字开头，可以使用字母、数字、连字符、点和下划线，最长63个字符。
+操作节点标签：
+kubectl get nodes --show-labels                  # 查看所有节点和lable
+kubectl label nodes 10.126.72.31 points=test     # 为某个节点增加lable
+kubectl label nodes node01 disk=ssd              # 给节点node01添加disk标签
+kubectl label nodes node01 disk=sss –overwrite   # 修改节点node01的标签
+kubectl label nodes node01 disk-                 # 删除节点node01的disk标签
+
+操作pod标签：
+kubectl label pods tomca app=tomcat                 # 给名为 tomcat 的 Pod 添加 label app=tomcat。
+kubectl label --overwrite pods tomcat app=tomcat1   # 把名为 tomcat 的Pod修改label 为 app=tomcat1，且覆盖现有的value
+kubectl label pods --all test=test                  # 把 namespace 中的所有 pod 添加 label
+kubectl label pods tomcat app-                      # 删除名为“app”的 label 。（使用“ - ”减号相连）
+
+
+# annotate
+更新资源的Annotations信息。
+注：如果同一个注解被赋值了多次，只保存最后一次设置的值。
+kubectl annotate pods foo description=‘my frontend’     # 更新pod(如，foo)，设置其注解’description’的值为’my frontend’。
+
+
+
+# version
+kubectl version         # 查看客户端和服务端的版本信息。
+kubectl api-versions    # 以“组/版本”的格式输出服务端支持的API版本。
+kubectl api-resources   # 输出服务端API支持的资源类型。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Finalizer 阻塞
+# 手动强制删除卡住的命名空间
+1.手动强制删除卡住的命名空间
+kubectl get ns <你的命名空间名称> -o json > ns-delete.json
+2.编辑 ns-delete.json 文件
+删除 spec.finalizers 数组中的所有内容（比如 kubernetes 这个默认终接器），最终 spec 部分应如下：
+"spec": {
+  "finalizers": []
+}
+3.启动Kubernetes API的临时代理
+kubectl proxy
+4.新开一个终端，执行强制删除请求
+curl -k -H "Content-Type: application/json" -X PUT --data-binary @ns-delete.json http://127.0.0.1:8001/api/v1/namespaces/<你的命名空间名称>/finalize
+5.验证是否删除成功
+kubectl get ns <你的命名空间名称>
+
+# 手动移除Pod的Finalizer
+1.导出Pod配置为JSON文件
+kubectl get pod <pod-name> -n <命名空间> -o json > pod-delete.json
+2.编辑pod-delete.json：删除metadata.finalizers数组中的所有内容，示例：
+"metadata": {
+  "finalizers": [],  // 清空终接器
+  "name": "<pod-name>",
+  "namespace": "<命名空间>"
+}
+3.通过API强制更新Pod配置：
+启动 kubectl proxy（保持窗口打开）
+kubectl proxy
+新开终端执行更新
+curl -k -H "Content-Type: application/json" -X PUT --data-binary @pod-delete.json http://127.0.0.1:8001/api/v1/namespaces/<命名空间>/pods/<pod-name>
+4.再次执行强制删除命令
+kubectl delete pod <pod-name> -n <命名空间> --force --grace-period=0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
