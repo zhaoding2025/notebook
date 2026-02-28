@@ -62,3 +62,12 @@ while trying to verify candidate authority certificate "kubernetes")
 [root@master1 .kube]# sudo mv admin.conf config
 [root@master1 .kube]# sudo service kubelet restart
 Redirecting to /bin/systemctl restart kubelet.service
+
+
+5. FailedCreatePodSandBox Failed to create pod sandbox: rpc error: code = Unknown desc = [failed to set up sandbox 
+container "b34a2d9e0d51ce11653eb4ffe5a5809a0749491e39d26eb31317bf54d2eafef1" network for pod "nfs-test-pd1": networkPlugin cni failed to set up 
+pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is unauthorized: Unauthorized, failed to clean up sandbox 
+container "b34a2d9e0d51ce11653eb4ffe5a5809a0749491e39d26eb31317bf54d2eafef1" network for pod "nfs-test-pd1": networkPlugin cni failed to 
+teardown pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is unauthorized: Unauthorized]
+
+

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-test-pd1
+  namespace: test
+spec:
+  nodeSelector:
+        selector: node1
+  containers:
+  - name: test-container
+    image: nginx:1.27.0
+    volumeMounts:
+    - mountPath: /usr/share/nginx/html
+      name: test-volume
+  volumes:
+  - name: test-volume
+    nfs:
+      server: 172.16.96.100   # 网络存储服务地址
+      path: /home/nfs/rw/www/wolfcode      # 网络存储路径
+      readOnly: false           # 是否只读
+                                                                                                                                                                                                                                                                                                                                                                                                 18,10         All

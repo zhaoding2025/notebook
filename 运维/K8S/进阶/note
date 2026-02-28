@@ -1,0 +1,7 @@
+
+
+
+nfs存储
+nfs server
+(base) [root@nfs ~]# mkdir -p /home/nfs/rw/www/wolfcode
+(base) [root@nfs ~]# echo '<h1>wolfcode</h1>' > /home/nfs/rw/www/wolfcode/index.html
