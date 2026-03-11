@@ -1,0 +1,9 @@
+1.ncdu按照
+# 安装EPEL扩展源
+yum install -y epel-release
+# 安装ncdu
+yum install -y ncdu
+# 查看ncdu版本
+ncdu --version
+# 直接执行ncdu扫描DeepGen目录
+ncdu /inspire/ssd/project/deepgen
