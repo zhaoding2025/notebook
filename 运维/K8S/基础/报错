@@ -70,4 +70,42 @@ pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is
 container "b34a2d9e0d51ce11653eb4ffe5a5809a0749491e39d26eb31317bf54d2eafef1" network for pod "nfs-test-pd1": networkPlugin cni failed to 
 teardown pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is unauthorized: Unauthorized]
 
+6.Calico node 'master' is already using the IPv4 address 172.18.0.1
+报错信息：[root@master 0311]# kubectl logs calico-node-wh8tk -n kube-system
+2026-03-12 08:05:10.528 [INFO][8] startup/startup.go 425: Early log level set to info
+2026-03-12 08:05:10.528 [INFO][8] startup/utils.go 127: Using NODENAME environment for node name node2
+2026-03-12 08:05:10.528 [INFO][8] startup/utils.go 139: Determined node name: node2
+2026-03-12 08:05:10.528 [INFO][8] startup/startup.go 94: Starting node node2 with version v3.24.1
+2026-03-12 08:05:10.529 [INFO][8] startup/startup.go 430: Checking datastore connection
+2026-03-12 08:05:10.538 [INFO][8] startup/startup.go 454: Datastore connection verified
+2026-03-12 08:05:10.538 [INFO][8] startup/startup.go 104: Datastore is ready
+2026-03-12 08:05:10.547 [INFO][8] startup/autodetection_methods.go 103: Using autodetected IPv4 address on interface br-6d83c0135301: 172.18.0.1/16
+2026-03-12 08:05:10.547 [INFO][8] startup/startup.go 559: Node IPv4 changed, will check for conflicts
+2026-03-12 08:05:10.549 [WARNING][8] startup/startup.go 988: Calico node 'master' is already using the IPv4 address 172.18.0.1.
+2026-03-12 08:05:10.549 [INFO][8] startup/startup.go 389: Clearing out-of-date IPv4 address from this node IP="172.18.0.1/16"
+2026-03-12 08:05:10.556 [WARNING][8] startup/utils.go 49: Terminating
+报错原因:CNI网络清理失败、Pod删除报错的根本原因——节点IP冲突(node2和master都抢占了172.18.0.1这个IP)
 
+# 步骤 1:确认节点 IP 配置（定位冲突来源）
+# 1. 查看所有节点的 Calico 网络配置
+kubectl get nodes -o wide  # 看每个节点的实际主机 IP（非容器网桥 IP）
+kubectl get ipamblocks.crd.projectcalico.org -A  # 查看 Calico 分配的 IP 块
+
+# 2. 登录 node2 节点，查看网卡 IP（找到 172.18.0.1 所属网卡）
+ssh node2
+ip addr show | grep 172.18.0.1  # 确认该 IP 绑定在 br-6d83c0135301（Docker/容器网桥）
+
+# 3. 查看 master 节点的同网卡 IP
+ssh master
+ip addr show | grep 172.18.0.1
+
+
+# 步骤 2：强制 Calico 使用节点的物理网卡 IP（核心修复）
+# 1. 编辑 Calico DaemonSet，添加节点 IP 配置
+kubectl edit daemonset calico-node -n kube-system
+# 在 spec.template.spec.containers[0].env 中添加以下环境变量（替换 <node2-物理IP>/<master-物理IP> 为节点实际主机 IP，如 192.168.1.102/192.168.1.101）：
+env:
+- name: IP
+  value: "<节点物理IP>"  # 每个节点需对应自己的物理IP，也可改为自动识别物理网卡：valueFrom.fieldRef.fieldPath=status.hostIP
+- name: IP_AUTODETECTION_METHOD
+  value: "interface=eth0"  # 指定物理网卡名称（如 eth0/ens33，根据节点实际网卡改）
