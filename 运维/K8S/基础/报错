@@ -70,6 +70,9 @@ pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is
 container "b34a2d9e0d51ce11653eb4ffe5a5809a0749491e39d26eb31317bf54d2eafef1" network for pod "nfs-test-pd1": networkPlugin cni failed to 
 teardown pod "nfs-test-pd1_test" network: error getting ClusterInformation: connection is unauthorized: Unauthorized]
 
+[root@master mar]# kubectl apply -f https://docs.projectcalico.org/v3.28/manifests/rbac-kdd.yaml    # 一键修复 Calico 权限
+[root@master mar]# kubectl rollout restart ds calico-node -n kube-system    # 重启 Calico 让权限生效
+
 6.Calico node 'master' is already using the IPv4 address 172.18.0.1
 报错信息：[root@master 0311]# kubectl logs calico-node-wh8tk -n kube-system
 2026-03-12 08:05:10.528 [INFO][8] startup/startup.go 425: Early log level set to info
