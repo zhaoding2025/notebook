@@ -493,6 +493,36 @@ ab -n 600000 -c 1000 http://IP地址/index.html
 # 安装nginx软件包
 [root@master ~]# dnf install nginx -y
 # 创建nginx代理配置文件
+ 
+
+## 第六章 Ingress七层负载均衡
+# 参考地址：https://kubernetes.io/zh-cn/docs/concepts/services-networking/ingress/
+# 在k8s中，ingress和service都用于处理网络流量，但它们的作用和功能有所不同
+# 功能和使用场景：
+# Service：工作在第四层（传输层），处理基于IP和端口的流量，主要用于集群内部的服务发现（允许集群内的其它Pod通过DNS名称访问Service）和负载均衡
+# 举例：一个微服务架构中，程序的不同组件运行不同的Pod中，但需要相互通信，此时就可以通过service定义相关的代理规则，来实现集群内部的程序相互通信
+# Ingress：工作在第七层（应用层），处理基于HTTP/HTTPS协议的流量，提供基于域名和路径的流量管理
+# 举例：一个集群中运行多个web应用，每个应用有着不同的域名，此时就可以通过ingress实现不同的应用通过不同的域名进行访问，或者同一个域名下，不同路径的请求需要转发到不同的服务上
+# Ingress本身不处理流量，需要一个ingress控制器来实际实现这些功能，例如：Nginx Ingress Controller
+# Nginx Ingress环境部署
+# 参考链接：https://blog.csdn.net/justlpf/article/details/132227856
+# 1.文件配置 ingress/deploy.yaml  阿里云镜像直接运行
+# 2.创建nginx ingress
+[root@master ingress]# kubectl apply -f deploy.yaml 
+# 3.查看pod状态
+# 查看pod状态。可以看到ingress-nginx-controller的pod在正常运行
+[root@master ingress]# kubectl get pods -o wide -n ingress-nginx
+# 4.检查ingress-nginx工作状态
+[root@master ingress]# kubectl get pods --namespace=ingress-nginx
+# 如果输出结果中的状态是“Running”，则表示Ingress-Nginx已经安装成功。
+# 5.查看ingress-nginx空间的service
+[root@master ingress]# kubectl get svc -n ingress-nginx
+# 6.部署ingress、service、deploy
+[root@master ingress]# kubectl apply -f minimal-ingress.yaml 
+[root@master ingress]# kubectl apply -f nginx-deploy.yaml 
+# 7.访问
+# http://本地IP:32356
+
 
 ## ConfigMap介绍
 # 在部署应用时，许多应用程序会从配置文件或环境变量中读取所需的配置信息，如果程序较多且分散在集群的不同节点上，那么更新配置就很麻烦
