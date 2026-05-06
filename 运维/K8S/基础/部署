@@ -537,7 +537,8 @@ ab -n 600000 -c 1000 http://IP地址/index.html
 [root@master yml]# kubectl apply -f configmap-deploy-nginx.yml 
 # Tips：ConfigMap挂载到容器目录时，如果该目录有其他文件，默认会覆盖目录下其他文件。可以通过subPath属性挂载，
 # subPath可以将configMap作为文件挂载到容器中而不是覆盖挂载目录下的文件
-
+# ConfigMap更新
+# 通过Volume挂载到容器内部时，当ConfigMap发生变化时，容器内部具备自动更新的能力，但是通过subPath挂载的ConfigMap不会自动更新
 
 ## Secret介绍
 # Secret与ConfigMap类似，区别在于ConfigMap存储的数据是明文，而Secret存储的数据是密文。所以Secret用来存储和管理一些敏感数据，比如账号、密码、token、ssh密钥、证书等内容
