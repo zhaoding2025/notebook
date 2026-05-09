@@ -52,7 +52,7 @@
     [root@master ~]# mkdir compose-wordpress && cd compose-wordpress
     docker-compose-wordpress部署
 
-第七章：Docker私有仓库
+第七章 Docker私有仓库
 安装harbor仓库
     # 1.下载离线安装包
     wget

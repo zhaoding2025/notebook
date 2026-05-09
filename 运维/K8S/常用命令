@@ -186,6 +186,7 @@ kubectl api-resources   # 输出服务端API支持的资源类型。
 
 
 
+[root@master mar]# kubectl rollout restart ds calico-node -n kube-system    # 重启 Calico 让权限生效
 
 
 

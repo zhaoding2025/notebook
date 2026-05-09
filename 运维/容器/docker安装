@@ -250,8 +250,35 @@ mkdir -p /etc/containerd/certs.d/172.17.96.100
     capabilities = ["pull","resolve","push"]
 
 
-
-
-
-
 export DOCKER_API_VERSION=1.41
+
+
+三.Harbor镜像仓库
+# harbor是VMWare公司提供的一款适用于企业内部使用的镜像仓库，提供了对用户友好的管理界面，提供了权限控制、分布式发布、强大的安全扫描与审查机制等功能
+1.安装harbor仓库
+# 下载harbor离线安装包
+https://github.com/goharbor/harbor/releases
+releases/download/v2.5.1/harbor-offline-installer-v2.5.1.tgz
+# 解压harbor压缩包
+tar xf harbor-offline-installer-v2.5.1.tgz
+# 进入解压目录
+cd harbor/ && ls
+# 导入Harbor镜像
+docker load -i harvor.v2.5.1.tar.gz
+# 准备harbor.yml配置文件并修改
+mv harbor.yml.tmpl harbor.yml
+
+vim harbor.yml
+hostname: 192.168.0.110    # 通过主机IP访问harbor，也可以定义域名
+http:                      # 访问方式为http（不用修改）
+  port: 80                 # 默认端口（不用修改）
+
+# https:                   # 注释HTTPS访问方式（需要证书才可以使用）
+#   ports: 443             # 注释HTTPS端口
+# certificate: /root/harbor/68xxxx_kubemsb.com.pem  # 注释证书
+# private_key: /root/harbor/68xxxx_kubemsb.com.pem  # 注释证书
+harbor_admin_password: 12345    # admin密码
+
+# 提示：harbor的每个组件都是以容器的形式构建的，且需要通过docker-compose进行后期的启动、关闭等，如果在新的主机部署harbor，需要提前安装docker环境和docker-compose程序
+# 执行当前路径的安装脚本
+./install.sh
