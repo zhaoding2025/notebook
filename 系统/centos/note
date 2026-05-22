@@ -1,1 +1,21 @@
 centos
+
+vmware-fusion 扩展用户磁盘大小
+参考链接：https://zhuanlan.zhihu.com/p/1920935309056652627
+1、选择对应的虚机--设置--硬盘，调整到自己需要的大小。这里我从20G调整到40G
+2、启动虚机
+    执行命令lsblk
+3、扩展分区 nvme0n1p3
+    安装命令：dnf install cloud-utils-growpart.aarch64
+    sudo growpart /dev/nvme0n1 3
+    lsblk
+4、扩展逻辑卷（root 分区）
+    sudo lvdisplay
+    找逻辑卷路径（你已经知道是 /dev/rhel_bogon/root，也可以再次确认）：
+    扩展逻辑卷（把所有空余空间加进去）
+    sudo lvextend -l +100%FREE /dev/rhel_bogon/root
+    (base) [root@nfs ~]# sudo lvextend -l +100%FREE /dev/rl_172/root
+5、扩展 XFS 文件系统
+    sudo xfs_growfs /
+    df -h /
+    扩展成功
