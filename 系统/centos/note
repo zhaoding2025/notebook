@@ -1,6 +1,21 @@
-centos
+Rocky Linux release 9.7
 
-vmware-fusion 扩展用户磁盘大小
+一、修改固定ip地址
+1.修改命令
+nmcli connection modify ens160 \
+  ipv4.method manual \
+  ipv4.addresses 172.16.96.147/24 \
+  ipv4.gateway 172.16.96.2 \
+  ipv4.dns "8.8.8.8,114.114.114.114" \
+  connection.autoconnect yes
+2.连接
+nmcli connection up ens160
+3.验证
+ip a show ens160
+ping -c 3 baidu.com
+
+
+二、vmware-fusion 扩展用户磁盘大小
 参考链接：https://zhuanlan.zhihu.com/p/1920935309056652627
 1、选择对应的虚机--设置--硬盘，调整到自己需要的大小。这里我从20G调整到40G
 2、启动虚机

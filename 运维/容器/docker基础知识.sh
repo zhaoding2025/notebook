@@ -97,6 +97,50 @@ Tips: Harbor的每个组件都是以容器的形式构建的,且需要通过dock
 
 
 
+第八章 docker补充知识点
+8.1 网络模式
+docker安装后默认创建三种网络:
+docker network ls
+    bridge/host/none
+Bridge模式(默认)
+    原理:Docker 启动时会创建一个名为 docker0 的虚拟网桥（类似一台虚拟交换机）。每个容器通过一对 veth pair(虚拟网线)连接到这个网桥上
+    容器之间：通过 docker0 网桥二层转发，可以直接通信
+    容器访问外网：通过 iptables NAT(源地址转换)，借用宿主机 IP 出去
+    外网访问容器：需要通过 -p 手动做端口映射
+    局限:默认 bridge 网络下，容器之间只能通过 IP 通信，不支持通过容器名 DNS 解析。
+    自定义Bridge网络:
+        # 创建自定义网络
+        docker network create mynet
+        # 运行容器加入自定义网络
+        docker run -d --name web --network mynet nginx
+        docker run -d --name db --network mynet mysql
+        # 容器之间可以通过容器名直接通信
+        docker exec web ping db  # ✅ 自动 DNS 解析
+        自定义 Bridge 网络支持容器名自动 DNS 解析，这是日常开发中最常用的网络模式。
+
+Host模式
+    原理:容器不创建独立的网络命名空间，直接使用宿主机的网络栈。容器和宿主机共享 IP、端口。
+    性能	最高，无 NAT 转换开销
+    隔离性	最差，容器和宿主机网络完全共享
+    端口映射	-p 参数无效，容器直接占用宿主机端口
+    使用示例:
+        docker run -d --name my-nginx --network host nginx
+        # 直接访问宿主机 80 端口即可，不需要 -p 映射
+        curl http://localhost:80
+
+None模式
+    原理: 容器拥有独立的网络命名空间，但不配置任何网络接口(只有 loopback 回环接口 lo)。完全与外界隔离。
+    无法访问外网
+    无法被外部访问
+    无法与其他容器通信
+    使用示例:
+        docker run -d --name isolated --network none alpine sleep 3600
+        # 进入容器查看网络
+        docker exec isolated ip addr
+        # 只能看到 lo 接口，没有 eth0
+
+Overlay 模式
+    原理: 用于跨主机的容器通信。基于 VXLAN 隧道技术，将容器数据包封装成 UDP 包，通过宿主机之间的物理网络传输。
 
 
 

@@ -77,6 +77,17 @@ Tips：目录必须指定绝对路径，如果目录不存在，会自动创建
 [root@master ～]# docker pull mysql:8.0
 [root@master ~]# docker run -d --name=wp-mysql -p 3306:3306 -v /mysql-volume/data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=Admin123 -e MYSQL_DATABASE=wp mysql:8.0
 
+# 数据持久化 
+# 掌握 Volume 和 Bind Mount 的区别
+# 创建数据卷
+docker volume create mydata
+docker inspect mydata
+# 挂载数据卷运行容器
+docker run -d --name my-nginx -p 8080:80 -v mydata:/usr/share/nginx/html nginx
+# 挂载宿主机目录
+docker run -d --name my-nginx -p 8080:80 -v /root/html:/usr/share/nginx/html nginx
+
+
 
 ## 6.DockerFile定制镜像
 # DockerFIle常用指令

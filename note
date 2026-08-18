@@ -7,3 +7,14 @@ yum install -y ncdu
 ncdu --version
 # 直接执行ncdu扫描DeepGen目录
 ncdu /inspire/ssd/project/deepgen
+
+
+
+
+
+git
+    root  Zhaod@2026
+jenkins
+    zhaod  000000
+
+

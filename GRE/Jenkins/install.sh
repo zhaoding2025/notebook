@@ -42,3 +42,9 @@ Environment="JENKINS_PORT=8100"
 # cat /var/lib/jenkins/secrets/initialAdminPassword
 843080f02cf142a4afeceaa1b6083754
 
+
+
+三.安装git
+dnf install -y git
+装完再用 which git 确认路径，再填到 Jenkins 里。
+
