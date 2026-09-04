@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-emptydir
+spec:
+  volumes:
+  - name: nginx-data
+    emptyDir: {}
+  containers:
+  - name: storage-emptydir-nginx
+    image: wangxiaochun/nginx:1.20.0
+    volumeMounts:
+    - name: nginx-data
+      mountPath: /usr/share/nginx/html/
+  - name: storage-emptydir-busybox
+    image: busybox:1.32.0
+    volumeMounts:
+    - name: nginx-data
+      mountPath: /data/
+    command:
+    - "/bin/sh"
+    - "-c"
+    - "while true; do echo $(date) > /data/index.html; sleep 1; done"

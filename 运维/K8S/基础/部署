@@ -111,7 +111,7 @@ EOF
 # 设置kubelet开机自启动，集群初始化后自动启动
 systemctl enable kubelet && systemctl start kubelet
 
-master节点：
+master节点:
 kubeadm config images list
 [root@master ~]# kubeadm config print init-defaults > kube-init.yml
 [root@master ~]# vi kube-init.yml 
@@ -123,7 +123,7 @@ imageRepository: registry.cn-hangzhou.aliyuncs.com/google_containers
 # 其他集群重新打印获取token
 kubeadm token create --print-join-command
 
-Node节点：
+Node节点:
 [root@node1 ~]# export DOCKER_API_VERSION=1.41
 [root@node1 ~]# kubeadm join 172.16.96.134:6443 --token abcdef.0123456789abcdef         --discovery-token-ca-cert-hash sha256:9bffc18dc83a6f844e927a0a388cf63c58f542c78b4cc1770bb20de7aaf445a6
 
@@ -767,20 +767,20 @@ Failed(失败)        # 无法正常使用
 
 第十章 StatefulSet控制器
 对于部署的应用，大体可以分为两类，一类是无状态应用，一类是有状态应用：
-无状态应用：像Nginx这类Web应用可称为无状态应用，不需要存储任何数据至本地，也没有任何启动顺序和主从角色之分，这类应用就可以
-      通过RS、Deployment、DaemonSet控制器来进行部署，他们所管理的Pod地址、名字、启动顺序都是随机的
-有状态应用：像MySQL这类需要存储数据的应用可称为有状态应用，他们有主从角色之分，又存在先后启动顺序，这类应用就可以通过StatefulSet控制器部署
+无状态应用: 像Nginx这类Web应用可称为无状态应用, 不需要存储任何数据至本地，也没有任何启动顺序和主从角色之分，这类应用就可以
+      通过RS、Deployment、DaemonSet控制器来进行部署, 他们所管理的Pod地址、名字、启动顺序都是随机的
+有状态应用: 像MySQL这类需要存储数据的应用可称为有状态应用, 他们有主从角色之分, 又存在先后启动顺序, 这类应用就可以通过StatefulSet控制器部署
 
 StatefulSet介绍
-在k8s中StatefulSet控制器用于管理油状态应用的控制器。他的主要特点如下：
-稳定的网络标识：StatefulSet管理的Pod拥有固定的名称，Pod名字称为网络标识，可以通过DNS查询来发现每个Pod（也叫服务发现）
-持久化存储：StatefulSet为每个Pod关联一个PV，实现数据的持久化，并且当Pod故障被重建后，依然会自动使用此前的PV保存数据
-有序部署和扩展：StatefulSet可以定义Pod先后顺序来部署和更新Pod。在扩展时，可以确保有序的扩展，且新生成的Pod名称与现有的Pod保持一致
-有序的缩容：StatefulSet缩减Pod时，它会按照与创建相反的顺序逐个删除其管理的Pod，这确保了有状态应用的有序关闭
+在k8s中StatefulSet控制器用于管理油状态应用的控制器。他的主要特点如下:
+稳定的网络标识: StatefulSet管理的Pod拥有固定的名称, Pod名字称为网络标识, 可以通过DNS查询来发现每个Pod(也叫服务发现)
+持久化存储: StatefulSet为每个Pod关联一个PV, 实现数据的持久化, 并且当Pod故障被重建后, 依然会自动使用此前的PV保存数据
+有序部署和扩展: StatefulSet可以定义Pod先后顺序来部署和更新Pod。在扩展时, 可以确保有序的扩展, 且新生成的Pod名称与现有的Pod保持一致
+有序的缩容: StatefulSet缩减Pod时, 它会按照与创建相反的顺序逐个删除其管理的Pod, 这确保了有状态应用的有序关闭
 
 StatefulSet组成
-Headless Service（无头服务）：Headless Service给每个Pod分配一个唯一的DNS名称，用于定义Pod的网络标识。如果Pod重建，Pod地址是变化的，但是Pod名称是不变的，可直接通过Pod名称访问。
-VolumeClaimTemplate（存储卷模版）：statefulset通过存储卷模板为每个Pod生成不同的PVC并绑定PV来实现各Pod有专用存储，而不是共用同一个存储卷
+Headless Service(无头服务): Headless Service给每个Pod分配一个唯一的DNS名称, 用于定义Pod的网络标识。如果Pod重建, Pod地址是变化的, 但是Pod名称是不变的, 可直接通过Pod名称访问。
+VolumeClaimTemplate(存储卷模版): statefulset通过存储卷模板为每个Pod生成不同的PVC并绑定PV来实现各Pod有专用存储, 而不是共用同一个存储卷
 
 
 
@@ -791,6 +791,19 @@ VolumeClaimTemplate（存储卷模版）：statefulset通过存储卷模板为�
 
 
 
+1、部署nginx后无法访问
+# 修改 Service 为 NodePort
+kubectl patch svc test-nginx -n test -p '{"spec":{"type":"NodePort"}}'
+kubectl get svc -n test
+# 本地电脑访问
+http://172.16.96.202:30080
 
+# 防火墙拦截端口
+# 如果使用 firewalld
+firewall-cmd --permanent --add-port=30080/tcp   # 端口号替换为实际值
+firewall-cmd --reload
+
+# 如果使用 ufw
+ufw allow 30080/tcp
 
 

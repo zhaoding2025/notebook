@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-1
+  namespace: demo
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data1"
+    server: 172.16.96.100
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-2
+  namespace: demo
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data2"
+    server: 172.16.96.100
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-3
+  namespace: demo
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data3"
+    server: 172.16.96.100

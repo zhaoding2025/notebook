@@ -1,0 +1,986 @@
+
+一、kubernetes存储机制
+1.docker存储
+# Docker的文件系统与docker容器具有相同的生命周期，节点崩溃、网络原因会导致容器异常退出，如果将数据存储到容器内部，会导致数据丢失
+# docker镜像是只读的文件，docker容器可读可写，但是不能够数据持久化
+# 所以为了避免这种数据异常丢失的情况，一般会将容器的数据（程序状态数据，应用存储数据等），存储在容器的文件系统之外。即通过引入外部的存储空间来实现数据的可持久化效果
+Docker的两种文化存储机制
+# host机制
+#   通过数据卷或者数据卷容器，将当前宿主机上面的文件系统目录与容器里面的工作目录进行一一的关联
+#   即使对本地磁盘做raid等冗余功能，等级的安全性无法保证
+# 网络存储机制
+#   通过网络的方式，将外部的存储空间挂载到当前宿主机，然后借助于host机制实现容器数据的可持久化
+
+1.2 存储卷volumes
+Kubernetes集群中的容器数据存储
+
+
+
+
+
+
+
+2 emptyDir
+# https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/#emptydir
+# 一个 emptyDir volume 在 pod 被调度到某个 Node 时候自动创建的，无需指定宿主机上对应的目录。适用于临时数据存储数据存放在宿主机的路径
+# /var/lib/kubelet/pods/<pod_id>/volumes/kubernetes.io~empty-dir/<volume_name>/<FILE>
+emptyDir 特点如下：
+#   此为默认存储类型
+#   跟随 Pod 初始化而来，开始是空数据卷
+#   Pod 移除，emptyDir 中数据随之永久消除
+#   emptyDir 数据卷介质种类跟当前主机的磁盘一样。
+#   emptyDir 主机可以为同一个 Pod 内多个容器共享
+#   emptyDir 容器数据的临时存储目录用于数据缓存使用
+# emptyDir 属性解析
+kubectl explain pod.spec.volumes.emptyDir
+#     medium        #指定媒介类型，主要有 default(The default is "" which means to use the node's default medium) 和
+# Memory两种，默认情况下，emptyDir卷支持节点上的任何介质，SSD、磁盘或网络存储，具体取决于自身的环境。也可以将emptyDir.medium
+# 字段设置为Memory，让 Kubernetes使用tmpfs(内存支持的文件系统)，虽然tmpfs非常快，但是tmpfs在节点重启时，数据同样会被清除，并
+# 且设置的大小会被计入到Container的内存限制当中。
+#     sizeLimit     #当前存储卷的空间限额，默认值为nil表示不限制
+
+kubectl explain pod.spec.containers.volumeMounts
+#     mountPath     #挂载到容器中的路径，此目录会自动生成
+#     name          #指定挂载的volumes名称
+#     readOnly      #是否只读挂载
+#     subPath       #是否挂载子目录的路径，默认不挂载子目录
+
+配置示例
+volume配置格式
+# volumes:
+#   - name: volume_name
+#     emptyDir: {}
+
+volume使用格式
+# containers:
+#     volumeMounts:
+#       - name: volume_name
+#         mountPath: /path/to/container/  #容器内路径
+# 注意：关于 volume 和容器的关系，每个容器都可以单独挂载多个 volume，每种 volume 都可以被多个容器挂载
+
+示例
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: test-pd
+# spec:
+#   containers:
+#   - image: registry.k8s.io/test-webserver
+#     name: test-container
+#     volumeMounts:
+#     - mountPath: /cache
+#       name: cache-volume
+#   volumes:
+#   - name: cache-volume
+#     emptyDir: {}
+
+范例: emptydir 使用
+#清单文件
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-emptydir-1.yaml
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: storage-emptydir
+#   labels:
+#     name: storage-emptydir
+# spec:
+#   volumes:
+#   - name: empty-volume
+#     emptyDir: {}
+#   containers:
+#     - name: storage-emptydir-container
+#       image: wangxiaochun/nginx:1.20.0
+#       volumeMounts:
+#         - name: empty-volume
+#           mountPath: /nginx/www/empty/
+#创建资源
+[root@master1 ~]#kubectl apply -f /yaml/storage-emptydir-1.yaml
+#查看资源信息
+[root@master1 ~]#kubectl describe pod
+#确认目录自动生成
+[root@master1 ~]#kubectl exec volume-nginx -- ls -ld /nginx/www/empty
+drwxrwxrwx 2 root root 4096 Mar 22 06:33 /nginx/www/empty
+
+#写文件
+[root@master1 ~]#kubectl exec -it storage-emptydir -- sh
+# echo empty-volume > /nginx/www/empty/test.txt
+# cat /nginx/www/empty/test.txt
+empty-volume
+
+#确定pod所在主机
+[root@master1 ~]#kubectl get pod -o wide
+NAME        READY   STATUS    RESTARTS   AGE     IP           NODE             NOMINATED NODE   READINESS GATES
+volume-nginx 1/1     Running   0          3m14s   172.16.3.56  node1.wang.org   <none>           <none>
+
+#在pod所在主机上查找文件
+[root@node1 ~]#find / -name test.txt
+/var/lib/kubelet/pods/1888534d-074b-4644-9ad7-96eba12883da/volumes/kubernetes.io~empty-dir/empty-volume/test.txt
+
+[root@node1 ~]#find / -name test.txt | xargs cat
+empty-volume
+
+[root@node1 ~]#cd /var/lib/kubelet/pods/dfd8ef27-e3d9-486b-ad11-03f45a328f75/
+[root@node1 dfd8ef27-e3d9-486b-ad11-03f45a328f75]#tree
+
+#删除pod
+[root@master1 ~]#kubectl delete -f /data/kubernetes/yaml/storage-emptydir-1.yaml
+pod "storage-emptydir" deleted
+
+#pod对应的目录也被删除
+[root@node1 ~]#ls /var/lib/kubelet/pods
+413120f6-6f80-47dd-969f-0c6185b65423  5412e06e-78bd-457b-8da3-600f7371da9b  ff394444-be24-4fff-b999e-10ba0deafddd2
+# 核心结论：删除 Pod，emptyDir 里面的数据会跟着一起清除，数据生命周期和 Pod 绑定
+
+案例
+# 在一个pod中定义多个容器通过emptyDir共享数据
+# 作用：同一个 emptyDir 挂载给 Pod 内两个容器，实现容器之间共享文件。busybox 不断往共享目录写时间，nginx 读取这个页面对外访问
+[root@master1 ~]#kubectl apply -f /yaml/storage-emptydir-2.yaml
+
+# 容器1
+[root@master Oct]# kubectl exec -it storage-emptydir -c storage-emptydir-nginx -n demo -- bash
+root@storage-emptydir:/# cat /usr/share/nginx/html/index.html 
+
+# 容器2
+[root@master Oct]# kubectl exec -it storage-emptydir -c storage-emptydir-redis -n demo -- bash
+root@storage-emptydir:/# cat /data/index.html 
+
+
+3.hostPath
+# 参考资料：https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/#hostpath
+hostPath 可以将宿主机上的目录挂载到 Pod 中作为数据的存储目录，一般用在如下场景：
+# 容器应用程序中某些文件需要永久保存
+# Pod 删除，hostPath 的数据对应在宿主机文件不受影响，即 hostPath 的生命周期和 Pod 不同，而和节点相同
+# 宿主机和容器的目录都会自动创建
+# 某些容器应用需要用到容器的内部数据结构，可将宿主机的 /var/lib/docker 挂载到 Pod 中
+hostPath 使用注意事项：
+# 不同宿主机的文件内容不一定完全相同，所以 Pod 迁移前后的访问效果不一样
+# 不适合 Deployment 这种分布式的资源，适合于 DaemonSet
+# 宿主机的目录不属于资源对象的资源，所以我们对资源设置的资源配额限制对 hostPath 目录无效
+
+配置属性
+kubectl explain pod.spec.volumes.hostPath
+# path # 指定哪个宿主机的目录或文件将被共享给 Pod 使用
+# type # 指定路径的类型，一共有 7 种，默认的类型是没有指定
+#       空字符串 #默认配置，在关联 hostPath 存储卷之前不进行任何检查，如果宿主机没有对应的目录，会自动创建
+#       DirectoryOrCreate #宿主机上不存在，创建此 0755 权限的空目录，属主属组均为 kubelet
+#       Directory #必须存在已存在的目录
+#       FileOrCreate #宿主机上不存在挂载文件，就创建 0644 权限的空文件，属主和属组同为 kubelet
+#       File #必须存在文件
+#       Socket #事先必须存在的 Socket 文件路径
+#       CharDevice #事先必须存在的字符设备文件路径
+#       BlockDevice #事先必须存在的块设备文件路径
+#配置格式：
+    volumes:
+    - name: volume_name
+      hostPath:
+        path: /path/to/host
+#示例
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pd
+spec:
+  containers:
+  - image: registry.k8s.io/test-webserver
+    name: test-container
+    volumeMounts:
+    - mountPath: /test-pd
+      name: test-volume
+  volumes:
+  - name: test-volume
+    hostPath:
+      # 宿主机上目录位置
+      path: /data
+      # 此字段为可选
+      type: Directory
+
+范例: 定制 Redis 环境，将数据的备份
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-hostpath-redis.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-redis
+spec:
+  nodeName: node1.wang.org        #指定运行在指定worker主机上
+  volumes:
+  - name: redis-backup
+    hostPath:
+      path: /backup/redis        #宿主机的目录会自动创建
+  containers:
+    - name: hostpath-redis
+      image: redis:6.2.5
+      volumeMounts:
+        - name: redis-backup
+          mountPath: /data
+
+#关键点: spec.containers.volumeMounts的name属性和spec.volumes的name属性完全一致,因为他们是基于name来关联的。
+#注意: redis的镜像将数据保存到了容器的/data 目录下。
+
+#创建资源对象
+[root@master1 ~]#kubectl apply -f /yaml/storage-hostpath-redis.yaml
+[root@master Oct]# kubectl exec -it hostpath-redis -n demo -- bash
+root@hostpath-redis:/data# redis-cli
+127.0.0.1:6379> get name
+"zhaod"
+
+
+4.网络共享存储
+# 虽然 hostpath 可以根据 pod 的配置自动创建关联的宿主机目录，但是因为 pod 通常会运行在不同的宿主机上，因此当前宿主机目录下面可能没有我们想要的数据文件，
+# 所以，在集群场景中，想要基于 hostpath 方式实现更强大的配置效果，就需要把所有的数据文件进行同步。
+# 基于此，我们需要一种可以实现网络存储的方式。
+4.1 实现 NFS 的网络共享存储
+# https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/#nfs
+# https://github.com/kubernetes/examples/tree/master/staging/volumes/nfs
+# 和传统的方式一样，通过 NFS 网络文件系统可以实现 Kubernetes 数据网络存储节享
+# 使用 NFS 提供的共享目录存储数据时，需要在系统中部署一个 NFS 环境，通过 volume 的配置，实现 pod 内的容器间共享 NFS 目录。
+属性解析
+#配置属性：
+kubectl explain pod.spec.volumes.nfs
+server      #指定nfs服务器的地址
+path        #指定nfs服务器暴露的共享地址
+readOnly    #是否只能读，默认false
+
+#配置格式：
+volumes:
+  - name: <卷名称>
+    nfs:
+      server: nfs_server_address  #指定NFS服务器地址
+      path: "共享目录"             #指定NFS共享目录
+      readOnly: false              #指定权限
+#注意事项：要求 Kubernetes 所有集群都必须支持 nfs 客户端命令，即所有结点都必须执行 apt -y install nfs-common
+
+# 示例
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pd
+spec:
+  containers:
+  - image: registry.k8s.io/test-webserver
+    name: test-container
+    volumeMounts:
+    - mountPath: /my-nfs-data
+      name: test-volume
+  volumes:
+  - name: test-volume
+    nfs:
+      server: my-nfs-server.example.com
+      path: /my-nfs-volume
+      readOnly: true
+
+范例: NFS存储
+#NFS服务器软件安装
+[root@master1 ~]#apt install -y nfs-kernel-server 或者 nfs-server
+[root@master1 ~]#systemctl enable --now nfs-server.service
+
+#配置共享目录
+[root@master1 ~]#mkdir /nfs-data
+[root@master1 ~]#echo '/nfs-data *(rw,no_root_squash,sync)' >> /etc/exports
+#注意：
+# *：表示允许所有连接，该值可以是一个网段 | IP | 域名的形式
+# rw 表示读写共享权限
+# no_root_squash 表示 root 登录 nfs 资源的时候，不压缩其权限
+# sync 所有操作数据会同时写入硬盘和内存
+#重启服务
+[root@master1 ~]#exportfs -r
+[root@master1 ~]#exportfs -v
+/nfs-data        <world>
+(rw,wdelay,no_root_squash,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash)
+
+#在所有kubernetes的worker节点充当NFS客户端需要安装NFS客户端软件
+[root@nodex ~]#apt -y install nfs-common 或者 nfs-client
+
+#测试效果
+[root@node1 ~]#showmount -e 10.0.0.101
+Export list for 10.0.0.101:
+/nfs-data *
+
+#注意: 如果所有客户端想要使用nfs的功能，必须提前安装软件，否则会发生找不到资源的报错。
+# Debian/Ubuntu：apt install nfs-common
+# Rocky/CentOS/RHEL：dnf install nfs-utils（Rocky 没有 nfs-client/nfs-common 包）
+# showmount -e NFS服务端IP 作用：查询 NFS 服务器暴露了哪些共享目录
+
+#编写资源配置文件
+[root@master1 ~]#cat /yaml/storage-nfs-1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volumes-nfs-1
+spec:
+  nodeName: node1.wang.org #指定在node1节点运行pod
+  volumes:
+    - name: redisdatapath
+      nfs:
+        server: 10.0.0.101
+        path: /nfs-data
+  containers:
+    - name: redis
+      image: redis:6.2.5
+      volumeMounts:
+        - name: redisdatapath
+          mountPath: /data
+
+[root@master Oct]# kubectl apply -f storage-nfs-1.yaml 
+[root@master Oct]# kubectl exec -it volumes-nfs-1 -n demo -- bash
+# root@volumes-nfs:/data# redis-cli
+# 127.0.0.1:6379> set key value
+# 1) "sex"
+# 2) "country"
+# 3) "name"
+# 4) "age"
+[root@master Oct]# kubectl apply -f storage-nfs-2.yaml 
+[root@master Oct]# kubectl exec -it volumes-nfs-2 -n demo -- bash
+# root@volumes-nfs:/data# redis-cli
+# 127.0.0.1:6379> keys *
+# 1) "sex"
+# 2) "country"
+# 3) "name"
+# 4) "age"
+
+4.2 实现其他的网络共享存储
+4.2.1 Ceph配置
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: volumes-cephfs-demo
+# spec:
+#   containers:
+#   - name: redis
+#     image: redis:alpine
+#     volumeMounts:
+#     - mountPath: "/data"
+#       name: redis-cephfs-vol
+#   volumes:
+#   - name: redis-cephfs-vol
+#     cephfs:
+#       monitors:
+#       - 10.0.0.201:6789
+#       - 10.0.0.202:6789
+#       - 10.0.0.203:6789
+#       path: /kube/namespaces/default/redis1
+#       user: fsclient
+#       secretFile: "/etc/ceph/fsclient.key"
+
+4.2.2 Glusterfs配置
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: volumes-glusterfs-demo
+#   labels:
+#     app: redis
+# spec:
+#   containers:
+#   - name: redis
+#     image: redis:alpine
+#     ports:
+#     - containerPort: 6379
+#       name: redisport
+#     volumeMounts:
+#     - mountPath: /data
+#       name: redisdata
+#   volumes:
+#   - name: redisdata
+#     glusterfs:
+#       endpoints: glusterfs-endpoints
+#       path: kube-redis
+
+4.2.2 cinder配置
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: volumes-cinder-demo
+#   labels:
+#     app: redis
+# spec:
+#   containers:
+#   - name: redis
+#     image: redis:alpine
+#     ports:
+#     - containerPort: 6379
+#       name: redisport
+#     volumeMounts:
+#     - mountPath: /data
+#       name: redisdata
+#   volumes:
+#   - name: redisdata
+#     cinder:
+#       # cinder块卷ID，需要提前在openstack创建好cinder卷
+#       volumeID: "c92f6d42-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#       # 是否只读，redis持久化需要读写，false
+#       readOnly: false
+
+5 PV 和 PVC
+5.1 PV 和 PVC
+# https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/
+# https://github.com/kubernetes/examples/tree/master/volumes/storageos
+# https://github.com/kubernetes/examples/tree/master/staging/volumes/nfs
+# 之前我们提到的 Volume 可以提供多种类型的资源存储 (可持久或不持久)，但是它定义在 Pod 上的，是属于 "资源对象" 的一部分。即用户在创建 Pod 时还需要关注存储的具体实现，这种方式造成 Pod 和存储的耦合度很高，无疑是很不方便管理的
+# 由于每个 Pod 对存储的要求不同，比如大小，读写权限等，所以还需要 Pod 用户提前自行准备存储，对用户有更高的存储方面的技术要求
+# 此外 Pod 使用的存储空间并没有加以限制，所以很可能会导致某个 Pod 占有过多的存储空间
+# Kubernetes-v1.0 开始即支持 PV 和 PVC 来解决上述问题
+PV Persistent Volume
+# 工作中的存储资源一般都是独立于 Pod 的，将之称为资源对象 Persistent Volume (PV)，是由管理员设置的存储，它是 kubernetes 集群的一部分，PV 是 Volume 之类的卷插件，但具有独立于使用 PV 的 Pod 的生命周期。
+# Persistent Volume 跟 Volume 类似，区别就是：
+#   PV 就是 Kubernetes 集群中的网络存储，不属于 Node、Pod 等资源，但可以被它们访问
+#   PV 是独立的网络存储资源对象，有自己的生命周期
+#   PV 属于 Kubernetes 整个集群，即可以被所有集群的 Pod 访问
+#   PV 是集群级别的资源，负责将存储空间引入到集群中，通常由管理员定义
+#   支持很多种 volume 类型，PV 对象可以有很多常见的类型：本地磁盘、NFS、分布式文件系统...
+# https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/#persistent-volumes
+
+持久卷的类型
+# PV 持久卷是用插件的形式来实现的。Kubernetes 目前支持以下插件：
+#   cephfs - CephFS volume
+#   csi - 容器存储接口 (CSI)
+#   fc - Fibre Channel (FC) 存储
+#   hostPath - HostPath 卷（仅供单节点测试使用；不适用于多节点集群；请尝试使用 local 卷作为替代）
+#   iscsi - iSCSI (SCSI over IP) 存储
+#   local - 节点上挂载的本地存储设备
+#   nfs - 网络文件系统 (NFS) 存储
+#   rbd - Rados 块设备 (RBD) 卷
+# 以下的持久卷已被弃用。这意味着当前仍是支持的，但是 Kubernetes 将将来的发行版会将其移除。
+#   awsElasticBlockStore - AWS 弹性块存储（EBS）（于 v1.17 弃用）
+#   azureDisk - Azure Disk（于 v1.19 弃用）
+#   azureFile - Azure File（于 v1.21 弃用）
+#   cinder - Cinder（OpenStack 块存储）（于 v1.18 弃用）
+#   flexVolume - FlexVolume（于 v1.23 弃用）
+#   gcePersistentDisk - GCE Persistent Disk（于 v1.17 弃用）
+#   glusterfs - Glusterfs 卷（于 v1.25 弃用）
+#   portworxVolume - Portworx 卷（于 v1.25 弃用）
+#   vsphereVolume - vSphere VMDK 卷（于 v1.19 弃用）
+# 旧版本的 Kubernetes 仍支持这些 “树内（In-Tree）” 持久卷类型：
+#   photonPersistentDisk - Photon 控制器持久化盘。（从 v1.15 版本开始将不可用）
+#   scaleIO - ScaleIO 卷（v1.21 之后不可用）
+#   flocker - Flocker 存储（v1.25 之后不可用）
+#   quobyte - Quobyte 卷（v1.25 之后不可用）
+#   storageos - StorageOS 卷（v1.25 之后不可用）
+
+PVC Persistent Volume Claim
+# Persistent Volume Claim (PVC) 是一个网络存储服务的请求。
+# PVC 属于名称空间级别的资源，由用户定义，用于在空闲的 PV 中申请使用符合过滤条件的 PV 之一，与选定的 PV 是 “一对一” 的关系
+# 用户在 Pod 上通过 pvc 插件请求绑定使用定义好的 PVC 资源
+# Pod 能够申请特定的 CPU 和 MEM 资源，但是 Pod 只能通过 PVC 到 PV 上请求一块独立大小的网络存储空间，而 PVC 可以动态的根据用户请求去申请 PV 资源，不仅仅涉及到存储空间，还有对应资源的访问模式，对于真正使用存储的用户不需要关心底层的存储实现细节，只需要直接使用 PVC 即可。
+# Pod、PV、PVC 关联关系
+# 前提：
+#   存储管理员配置各种类型的 PV 对象
+#   Pod、PVC 必须在同一个命名空间
+# 用户需要存储资源的时候：
+#   用户根据资源需求创建 PVC，由 PVC 自动匹配 (权限、容量) 合适的 PV 对象
+#   PVC 允许用户按需指定期望的存储特性，并以之为条件，按特定的条件顺序进行 PV 的过滤
+#   VolumeMode → LabelSelector → StorageClassName → AccessMode → Size
+#   在 Pod 内部通过 PVC 将 PV 绑定到当前的空间，进行使用
+#   如果用户不使用存储资源的话，解绑 PVC 和 Pod 即可
+
+PV和PVC的配置流程
+# 用户创建了一个包含 PVC 的 Pod，该 PVC 要求使用动态存储卷
+# Scheduler 根据 Pod 配置、节点状态、PV 配置等信息，把 Pod 调度到一个合适的 Worker 节点上
+# PV 控制器 watch 到该 Pod 使用的 PVC 处于 Pending 状态，于是调用 Volume Plugin (in-tree) 创建存储卷，并创建 PV 对象 (out-of-tree 由 External Provisioner 来处理)
+# AD 控制器发现 Pod 和 PVC 处于待挂载状态，于是调用 Volume Plugin 挂载存储设备到目标 Worker 节点上
+# 在 Worker 节点上，Kubelet 中的 Volume Manager 等待存储设备挂载完成，并通过 Volume Plugin 将设备挂载到全局目录 /var/lib/kubelet/pods/[pod uid]/volumes/kubernetes.io~iscsi/[PVname](以 iscsi 为例)
+# Kubelet 通过 Docker 启动 Pod 的 Containers，用 bind mount 方式将已挂载到本地全局目录的卷映射到容器中
+5.2 属性解析
+5.2.1 基础属性
+PV 的配置方法
+# 静态：集群管理员预制创建一些 PV。它们带有可供集群用户使用的实际存储的细节。
+# 动态：集群尝试根据用户请求动态地创建卷。此配置基于 StorageClasses；PVC 必须请求存储类，并且管理员必须创建并配置该 StorageClasses 才能进行动态创建。声明该类为 "" 可以有效地禁用其动态配置。
+PV 属性
+#PV 作为存储资源，主要包括存储能力、访问模式、存储类型、回收策略等关键信息，注意：PV 的名称不支持大写
+#https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/#persistent-volumes
+kubectl explain pv.spec
+  capacity                    #定义pv使用多少资源，仅限于空间的设定
+  accessModes                #访问模式
+  storageClassName           #存储类的名称，如果配置必须和PVC的storageClassName相同才能绑定
+  存储类型                     #每种存储类型的样式的属性名称都是专有的。
+  persistentVolumeReclaimPolicy  #资源回收策略，主要三种Retain、Delete、Recycle
+  volumeMode                 #文件系统或块设备，默认文件系统
+  mountOptions               #挂载选项，比如:["ro", "soft"]
+
+#注意:PersistentVolume 对象的名称必须是合法的 DNS 子域名。
+
+#示例
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv0003
+  labels:
+    release: "stable"   #便签可以支持匹配过滤PVC
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: slow
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  nfs:
+    path: /tmp
+    server: 172.17.0.2
+
+PVC 属性
+#PVC 属性信息，与所有空间都能使用的 PV 不一样，PVC 是属于名称空间级别的资源对象，即只有特定的资源才能使用
+#https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims
+# kubectl explain pvc.spec
+#   accessModes　　　　# 访问模式
+#   resources　　　　　# 资源限制
+#   selector　　　　　 #标签选择器实现选择绑定 PV
+#   storageClassName　 #存储类的名称，如果配置必须和 PV 的 storageClassName 相同才能绑定
+#   volumeMode　　　　 #后端存储卷的模式，文件系统或块，默认为文件系统
+#   volumeName　　　　 #指定绑定的卷 (pv) 的名称
+# kubectl explain pods.spec.volumes.persistentVolumeClaim
+#   claimName　# 定义 pvc 的名称，PersistentVolumeClaim 对象的名称必须是合法的 DNS 子域名。
+#   readOnly　 #设定 pvc 是否只读
+#合法的 DNS 子域名.
+# https://kubernetes.io/zh-cn/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+#选择算符
+# 申领可以设置标签选择算符 来进一步过滤卷集合。只有标签与选择算符相匹配的卷能够绑定到申领上。选择算符包含两个字段：
+# matchLabels - 卷必须包含带有此值的标签
+# matchExpressions - 通过设定键（key）、值列表和操作符（operator）来构造的需求。合法的操作符有 In、NotIn、Exists 和 DoesNotExist。
+# 来自 matchLabels 和 matchExpressions 的所有需求都按逻辑与的方式组合在一起，这些需求都必须被满足才被视为匹配。
+#类
+# 申领可以通过为 storageClassName 属性设置 StorageClass 的名称来请求特定的存储类。只有所请求的类的 PV 卷，即 storageClassName 值与 PVC 设置相同的 PV 卷，才能绑定到 PVC 申领
+
+#示例
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: myclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 8Gi
+  storageClassName: slow
+  selector:
+    matchLabels:
+      release: "stable"
+    matchExpressions:
+      - {key: environment, operator: In, values: [dev]}
+
+5.2.2 属性进阶
+# PV有生命周期,自然也有自己特定的状态
+# 注意: 这个过程是单向过程，不能逆向
+
+# 状态           解析
+# Availabled    空闲状态，表示PV没有被其他PVC对象使用
+# Bound         绑定状态，表示PV已经被其他PVC对象使用
+# Released      未回收状态，表示PVC已经被删除了，但是资源还没有被回收
+# Faild         资源回收失败
+
+创建PV → Pending → Availabled → Bound → Released → Deleted
+                         ↓
+                       Faild
+
+# AccessModes 是用来对 PV 进行访问模式的设置，用于描述用户应用对存储资源的访问权限，访问权限包括
+# https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/#access-modes
+
+# 类型                         解析
+# ReadWriteOnce (RWO)         单节点读写,即不支持并行(非并发)写入
+# ReadOnlyMany (ROX)          多节点只读
+# ReadWriteMany (RWX)         多节点读写
+# ReadWriteOncePod(RWOP)      单Pod读写,v1.22版以后才支持
+
+# 注意:
+# • 不同的后端存储支持不同的访问模式，所以要根据后端存储类型来设置访问模式。
+# • 一些 PV 可能支持多种访问模式，但是在挂载的时候只能使用一种访问模式，多种访问模式是不会生效的
+
+# 卷插件                ReadWriteOnce    ReadOnlyMany    ReadWriteMany    ReadWriteOncePod
+# AWSElasticBlockStore    √                -               -                 -
+# AzureFile               √                √               √                 -
+# AzureDisk               √                -               -                 -
+# CephFS                  √                √               √                 -
+# Cinder                  √                -           (如果多次挂载卷可用)    -
+# CSI                  取决于驱动      取决于驱动      取决于驱动        取决于驱动
+# FC                      √                √               -                 -
+
+PV 三种资源回收策略
+# 当 Pod 结束 volume 后可以回收资源对象删除PVC，而绑定关系就不存在了，当绑定关系不存在后这个PV需要怎么处理，而PersistentVolume 的回收策略告诉集群在存储卷声明释放后应如何处理该PV卷。
+# 目前，volume 的处理策略有保留、回收或删除。
+
+# kubernetes 会自动生成一个 recycler-for-<PV_NAME>的Pod来实现回收功能，但Retain除外
+
+# 类型     解析
+# Retain   保留PV和存储空间数据，后续数据的删除需要人工干预，一般推荐使用此项,此为默认值
+# Recycle  保留PV，但清空存储空间的数据,仅支持NFS和hostPath
+# Delete   相关的存储实例PV和数据都一并删除。需要支持删除功能的存储才能实现,动态存储一般会默认采用此方式
+
+# 注意：目前只有 NFS 和 HostPath 支持 Recycle 策略。其他支持 Delete 策略
+# [root@master1 ~]#kubectl explain pv.spec
+
+
+5.3 实战案例: PV 和 PVC 使用
+
+实现方法
+• 创建PV
+• 创建PVC: PVC会根据capacity和accessModes自动找到相匹配的PV进行绑定,一个PVC对应一个PV
+• 创建Pod
+    ◦ 在Pod中的volumes 指定调用上面的pvc
+    ◦ 在Pod中的容器中的volumeMounts指定pvc挂载容器内的目录路径
+
+范例: 以NFS类型创建一个3G大小的存储资源对象PV
+
+#准备NFS共享存储
+[root@master1 ~]#mkdir /nfs-data
+[root@master1 ~]#apt -y install nfs-server
+
+[root@master1 ~]#echo "/nfs-data *(rw,no_root_squash) >> "/etc/exports
+[root@master1 ~]#exportfs -r
+[root@master1 ~]#exportfs -v
+/nfs-data       <world>
+(rw,wdelay,no_root_squash,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash)
+
+#在所有worker节点安装nfs软件
+[root@node1 ~]#apt -y install nfs-common
+
+#准备PV,定制一个具体空间大小的存储对象
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-test   #注意:不支持大写字母
+spec:
+  capacity:
+    storage: 3Gi
+  accessModes:
+    - ReadWriteOnce
+  nfs:
+    path: /nfs-data
+    server: 10.0.0.101
+
+#如果该pv的使用方式支持多个，可以使用格式: accessModes: ["ReadWriteMany","ReadWriteOnce"]
+#如果nfs提供的目录空间个数多的话，可以同样的方式写多个。
+# Pv的资源对象类型: PersistentVolume
+# 存储空间大小设定: capacity
+# 存储空间的访问模式: accessModes
+#   ReadWriteOnce    #该volume只能被单个节点以读写的方式映射
+#   ReadOnlyMany     #该volume可以被多个节点以只读方式映射
+#   ReadWriteMany    #该volume只能被多个节点以读写的方式映射
+
+#可以指定回收策略: persistentVolumeReclaimPolicy: Recycle
+
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-pv.yaml
+persistentvolume/pv-test created
+
+[root@master1 ~]#kubectl get pv
+NAME      CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS   REASON   AGE
+pv-test   3Gi        RWO            Retain           Available                   7s
+
+#结果显示: 虽然我们在创建pv的时候没有指定回收策略，而其策略自动帮我们配置了Retain
+
+#准备PVC,定义一个资源对象，请求空间1Gi
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+#注意: 请求的资源大小必须在 pv资源的范围内。
+
+[root@master1 ~]#kubectl get pvc
+NAME       STATUS   VOLUME    CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+pvc-test   Bound    pv-test   3Gi        RWO                           5s
+
+#准备pod
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-nginx-pvc.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-nginx
+spec:
+  volumes:
+    - name: volume-nginx
+      persistentVolumeClaim:
+        claimName: pvc-test
+  containers:
+    - name: pvc-nginx-container
+      image: wangxiaochun/nginx:1.20.0
+      volumeMounts:
+        - name: volume-nginx
+          mountPath: "/usr/share/nginx/html"
+
+#属性解析:
+#spec.volumes 是针对pod资源申请的存储资源来说的，这里使用的主要是pvc的方式。
+#spec.containers.volumeMounts 是针对pod资源对申请的存储资源的信息，将pvc挂载的容器目录
+
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-nginx-pvc.yaml
+
+[root@master1 ~]#kubectl get pod -o wide
+NAME       READY   STATUS    RESTARTS   AGE   IP            NODE             NOMINATED NODE   READINESS GATES
+pod-nginx  1/1     Running   0          20s   172.16.3.62   node1.wang.org   <none>           <none>
+
+#默认页面无法访问,如果不准备首页的话，会导致 403 报错
+[root@master1 ~]#curl 172.16.3.62
+<html>
+<head><title>403 Forbidden</title></head>
+<body>
+<center><h1>403 Forbidden</h1></center>
+<hr><center>nginx/1.20.0</center>
+</body>
+</html>
+
+#添加网页文件
+[root@master1 ~]#echo PV Page > /nfs-data/index.html
+[root@master1 ~]#curl 172.16.3.62
+PV Page
+
+#注意:删除时，要按照顺序删除，先删除应用pod，再删除pvc，最后删除pv，否则会出现卡死现象
+
+# 删除pod
+[root@master1 ~]#kubectl delete -f /data/kubernetes/yaml/storage-nginx-pvc.yaml
+
+# 删除PVC
+[root@master1 ~]#kubectl delete -f /data/kubernetes/yaml/storage-pvc.yaml
+
+[root@master1 ~]#kubectl get pvc
+No resources found in default namespace.
+
+# 显示PV状态Released
+[root@master1 ~]#kubectl get pv
+NAME      CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS    CLAIM             STORAGECLASS   REASON   AGE
+pv-test   3Gi        RWO            Retain           Released  default/pvc-test                   41s
+
+# 删除PV
+[root@master1 ~]#kubectl delete -f /data/kubernetes/yaml/storage-pv.yaml
+
+[root@master1 ~]#kubectl get pv
+No resources found
+
+# 范例: 创建使用PVC的deployment
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-pv.yaml
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-pvc.yaml
+
+[root@master1 ~]#kubectl get pv
+NAME      CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM             STORAGECLASS   REASON   AGE
+pv-test   3Gi        RWO            Retain           Bound    default/pvc-test                  7m58s
+
+[root@master1 ~]#kubectl get pvc
+NAME       STATUS   VOLUME    CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+pvc-test   Bound    pv-test   3Gi        RWO                           7m58s
+
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-deployment-nginx-pvc.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-nginx-pvc
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-pvc
+  template:
+    metadata:
+      labels:
+        app: nginx-pvc
+    spec:
+      volumes:
+        - name: volume-nginx
+          persistentVolumeClaim:
+            claimName: pvc-test
+      containers:
+        - name: nginx-pvc
+          image: wangxiaochun/nginx:1.20.0
+          volumeMounts:
+            - name: volume-nginx
+              mountPath: "/usr/share/nginx/html"
+
+#创建deployment
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-deployment-nginx-pvc.yaml
+
+[root@master1 ~]#kubectl get pod -o wide
+NAME                                  READY   STATUS    RESTARTS   AGE   IP            NODE             NOMINATED NODE   READINESS GATES
+deployment-nginx-pvc-777d57f5f4-n7hp4   1/1     Running   0          7s    172.16.4.54   node2.wang.org   <none>           <none>
+deployment-nginx-pvc-777d57f5f4-p7nb5   1/1     Running   0          7s    172.16.3.64   node1.wang.org   <none>           <none>
+deployment-nginx-pvc-777d57f5f4-pb91t   1/1     Running   0          7s    172.16.3.65   node1.wang.org   <none>           <none>
+
+#查看多个Pod资源实现共享
+[root@master1 ~]#curl 172.16.4.54
+PV Page
+
+[root@master1 ~]#curl 172.16.3.64
+PV Page
+
+[root@master1 ~]#curl 172.16.3.65
+PV Page
+
+范例: PVC 自动绑定相匹配的 PV,PVC 和 PV 是自动关联的，而且会匹配容量和权限
+[root@master1 ~]#mkdir /nfs-data/data{1..3}
+[root@master1 ~]#cat /etc/exports
+/nfs-data *(rw,no_root_squash)
+
+#PV清单文件
+[root@master1 ~]#cat /data/kubernetes/yaml/storage-multi-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-1
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data1"
+    server: 10.0.0.101
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-2
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data2"
+    server: 10.0.0.101
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-3
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: "/nfs-data/data3"
+    server: 10.0.0.101
+
+[root@master1 yaml]#cat storage-multi-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-demo-1
+  namespace: default
+spec:
+  accessModes: ["ReadWriteMany"]
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 3Gi   
+    limits:
+      storage: 10Gi
+
+[root@master1 ~]#kubectl apply -f /data/kubernetes/yaml/storage-multi-pvc.yaml
+
+[root@master1 ~]#kubectl get pvc
+NAME         STATUS   VOLUME    CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+pvc-demo-1   Bound    pv-nfs-1   5Gi        RWX                           5m50s
+
+#自动绑定PVC至容量和权限都匹配的PV
+[root@master1 ~]#kubectl get pv
+NAME      CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                STORAGECLASS   REASON   AGE
+pv-nfs-1  5Gi        RWX            Retain           Bound       default/pvc-demo-1                           2m36s
+pv-nfs-2  5Gi        ROX            Retain           Available                                                  2m36s
+pv-nfs-3  1Gi        RWO            Retain           Available                                                  2m36s
+
+
+
+案例
+# 从pv-pvc-pod的使用
+# pv
+[root@master1 yaml]#cat storage-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-test
+spec:
+  capacity:
+    storage: 3Gi
+  accessModes:
+    - ReadWriteOnce
+  nfs:
+    path: /nfs-data
+    server: 10.0.0.101
+# pvc
+[root@master1 yaml]#cat storage-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+# pod
+[root@master1 yaml]#cat storage-nginx-pvc.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-nginx
+spec:
+  volumes:
+    - name: volume-nginx
+      persistentVolumeClaim:
+        claimName: pvc-test
+  containers:
+    - name: pvc-nginx-container
+      image: wangxiaochun/nginx:1.20.0
+      volumeMounts:
+        - name: volume-nginx
+          mountPath: "/usr/share/nginx/html"
+
+
+
+
+## 一、本地存储HostPath
+# 1.创建hostpath
+[root@master storage]# vi hostpath-deployment.yml 
+# 2.部署
+[root@master storage]# kubectl apply -f hostpath-deployment.yml 
+# 3.获取pod
+[root@master storage]# kubectl get pod -n test -o wide
+NAME                                   READY   STATUS    RESTARTS   AGE   IP               NODE    NOMINATED NODE   READINESS GATES
+hostpath-deployment-585795db67-8mhkm   1/1     Running   0          16s   172.18.166.182   node1   <none>           <none>
+hostpath-deployment-585795db67-x8sj2   1/1     Running   0          16s   172.18.104.63    node2   <none>           <none>
+# 4.访问
+[root@master storage]# curl 172.18.166.182:8080
+# 5.编写页面
+# 在node1节点/home目录下编写index.html
+# 6.再访问
+[root@master storage]# curl 172.18.166.182:8080
+# 7.删除pod
+[root@master storage]# kubectl apply -f hostpath-deployment.yml 
+# 8.node1节点 /html文件仍然存在
+# 9.再部署
+[root@master storage]# kubectl apply -f hostpath-deployment.yml 
+# 10.再访问
+[root@master storage]# curl 172.18.166.182:8080
+
+## 二、网络存储NFS
+[root@master storage]# cat nfs-deployment.yml 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

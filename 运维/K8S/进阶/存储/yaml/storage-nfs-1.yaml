@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volumes-nfs-1
+  namespace: demo
+spec:
+  nodeName: node1             #指定在node1节点运行pod
+  volumes:
+    - name: redisdatapath
+      nfs:
+        server: 172.16.96.100
+        path: /nfs-data
+  containers:
+    - name: redis
+      image: redis:6.0
+      volumeMounts:
+        - name: redisdatapath
+          mountPath: /data

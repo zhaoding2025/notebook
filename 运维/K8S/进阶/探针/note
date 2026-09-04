@@ -1,0 +1,187 @@
+Pod生命周期流程
+# 1.创建指令到送达api server
+# 2.通知scheduler调度此请求到合适的节点
+# 3.init容器
+#   初始化容器,独立于主容器之外,即和主容器是隔离的
+#   pod可以拥有任意数量的init容器,init顺序执行.最后一个执行完成后,才启动主容器
+#   init容器不支持探针检测功能
+#   它主要是为了主容器准备运行环境的功能,比如:给主容器准备配置文件,向主容器的存储卷写入数据,然后将存储卷挂载到主容器上,下载相关资源，检测主容器依赖服务等
+# 4.启动后钩子 PostStart:与主容器同时启动
+# 5.状态监测
+#   Startup probe: 启动探针
+#   Liveiness probe: 判断当前pod是否处于存活状态，是readiness存活的前提，对应ready状态的m/n的n值
+#   Readiness probe: 判断当前pod的主应用容器是否可以正常的对外提供服务，只有Liveniss为存活，readiness才有可能存活，对应ready状态的m/n的m值
+# 6.Service关联Pod
+# 7.接收用户请求
+# 8.关闭Pod前先执行钩子PreStop
+# 9.关闭Pod
+
+Pod的状态监控
+# 在以镜像打包技术为基础的环境中，容器运行起来的效果就类似于一个 "黑盒", 默认情况下我们不知道里面是一种什么样的运行环境，为了实时的监控容器应用环境的运行状态，容器提供了 inspect 的方法，让我们主动来采集相关的状态数据，但是这种方式太繁琐了。
+# 实际上，我们需要一种可以及时的获取容器的各种运行状态数据，所以对于容器任务编排的环境下，他们都应该考虑到一种场景：主动的将容器运行的相关数据暴露出来 -- 数据暴露接口。常见的就是包含大量 metric 指标数据的 API 接口。
+# 对于 k8s 内部的 pod 环境来说，常见的这些 API 接口有：
+process health  # 状态健康监测接口
+readiness       # 容器可读状态的接口
+liveness        # 容器存活状态的接口
+Metrics         # 监控指标接口
+tracing         # 全链路监控的埋点(探针)接口
+logs            # 容器日志接口
+
+Pod的健康性监控
+# pod通过探针机制实现Pod的健康性监控，当一旦检测出Pod故障时，会重置Pod或将Pod从service后端endpoint删除，从而实现服务的高可用
+
+三、探针类型
+StartupProbe:
+# kubernetes1.16 引用，启动探针，Pod 在启动时只进行一次，主要用于一些启动较慢的应用
+# 指示容器中的应用是否已经启动。如果提供了启动探针，则所有其他探针都会被禁用，直到此探针成功为止。如果启动探测失败，kubelet 将杀死容器，而容器依其重启策略进行重启。 如果容器没有提供启动探测，则默认状态为 Success。
+# 只有此探针成功，才能启动容器后续的 LivenessProbe 和 ReadinessProbe 探针，否则 kubelet 会关闭容器，并按 restartPolicy 处理
+# 如果没有定义此探针，默认成功
+# 实现用户自定义的一些启动探测机制，效果等同于 livenessProbe，区别在于应用不同的参数或阈值
+# 参照资料：kubectl explain pod.spec.containers.startupProbe
+LivenessProbe
+# 指示容器是否正在运行。如果存活态探测失败，则 kubelet 会杀死容器， 并且容器将根据其重启策略决定未来。如果容器不提供存活探针， 则默认状态为 Success。
+# 存活探针，周期性检测，用于持续跟踪探测容器是否运行，即只探测容器是否活着，但活着不一定能正常工作
+# 检测未通过时，kubelet 会关闭容器，并根据 restartPolicy 的定义来决定是否会重启该容器，默认会重置 Pod（重新还原镜像）并重启，但 Pod 名称，UID，IP 及内核配置保持不变
+# 检测失败后，会在 kubectl get pod 显示的 STATUS 状态为 CrashLoopBackOff，
+# 检测失败后，默认先删除 Pod 中容器，并且重新创建容器，但 Pod 的 ID 名称不变，如果继续失败，重复此过程
+# 检测失败后，重启此 Pod 时，如果配置对应的 Service，其后端 endpoint 也会删除此 Pod 的地址，但 Pod 重启后会再添加进 endpoint
+# 未定义时，Kubelet 认为只要容器未终止，即为健康
+# 参考资料：kubectl explain pod.spec.containers.livenessProbe
+
+ReadinessProbe:
+; 就绪探针，周期性检测，一般用于持续跟踪探测容器内应用是否健康，即探测容器不仅活着，而且可以正常工作
+; 指示容器是否准备好为请求提供服务。如果就绪态探测失败， 端点控制器将从与 Pod 匹配的所有服务的端点列表中删除该 Pod 的 IP 地址。初始延迟之前的就绪态的状态值默认为 Failure。 如果容器不提供就绪态探针，则默认状态为 Success。
+; 检测未通过时，与该 Pod 关联的 Service，会将该 Pod 从 Service 的后端可用端点列表中删除；直至再次就绪，重新添加回来。
+; 如果检测失败，会在 kubectl get pod 显示 STATUS 状态仍为 Running，并不会重启 Pod，但是 READY 状态为 0/1
+; 初始延迟前的就绪状态默认为 Failure
+; 未定义时，只要容器未终止，即为就绪
+; 参考资料: kubectl explain pod.spec.containers.ReadinessProbe
+
+配置探针
+; Probe 有很多配置字段，可以使用这些字段精确地控制启动、存活和就绪检测的行为：
+; initialDelaySeconds：容器启动后要等待多少秒后才启动启动、存活和就绪探针， 默认是 0 秒，最小值是 0。
+; periodSeconds：执行探测的时间间隔（单位是秒）。默认是 10 秒。最小值是 1。
+; timeoutSeconds：探测的超时后等待多少秒。默认值是 1 秒。最小值是 1。
+; successThreshold：探针在失败后，被视为成功的最小连续成功数。默认值是 1。 存活和启动探测的这个值必须是 1。最小值是 1。
+; failureThreshold：当探测失败时，Kubernetes 的重试次数。 对存活探测而言，放弃就意味着重新启动容器。对就绪探测而言，放弃意味着 Pod 会被打上未就绪的标签。默认值是 3。最小值是 1。
+
+spec:
+  containers:
+  - name: string
+    image: string
+    livenessProbe:
+      exec <Object>                  # 命令式探针
+      httpGet <Object>               # http GET类型的探针
+      tcpSocket <Object>             # tcp Socket类型的探针
+      initialDelaySeconds <integer>  # 发起初次探测请求的延后时长，默认为0，生产中根据服务启动时长来设置，防止反复重启
+      periodSeconds <integer>        # 每次探测请求间隔，即探测的周期，默认10s，如果 Pod众多，可适当设长，比如60s
+      timeoutSeconds <integer>       # 探测的超时时长，默认是1s
+      successThreshold <integer>     # 连续成功几次才表示状态正常，默认值是1次，注意：liveness和startup只能是1
+      failureThreshold <integer>     # 连续失败几次才表示状态异常，默认值是3次，即从成功变为失败的检查次数
+
+#注意：上面以livenessProbe为例，StartupProbe和readinessProbe 的属性与livenessProbe是相同的
+
+
+3.2 Pod 实现探针的三种方式
+监测的实现方式
+; 对于 Pod 中多容器的场景，只有所有容器就绪，才认为 Pod 就绪
+; https://kubernetes.io/zh-cn/docs/concepts/workloads/pods/pod-lifecycle/#container-probes
+; kubelet 定期执行 LivenessProbe 和 ReadinessProbe 探针来诊断 Pod 的健康状况，Pod 探针的实现方式有很多，常见的有如下三种：
+; 监测的实现方式	 解析
+; Exec	          直接执行指定的命令，根据命令结果的状态码判断是否成功，成功则返回表示探测成功
+; TCPSocket	      根据相应 TCP 套接字连接建立状态判断，如果端口能正常打开，即成功
+; HTTPGet	      根据指定 Http/Https 服务 URL 的响应码结果判断，当 2xx,3xx 的响应码表示成功
+; gRPC	          使用 gRPC 执行一个远程过程调用。目标应该实现 gRPC 健康检查。如果响应的状态是 "SERVING"，则认为诊断成功。gRPC 探针是一个 Alpha 特性，只有在你启用了 "GRPCContainerProbe" 特性门控时才能使用。
+
+
+# readinessProbe exec 就绪探针命令式
+readinessProbe:
+  exec:
+    command:
+      - /bin/health-check
+      - --quiet
+  initialDelaySeconds: 5
+  periodSeconds: 15
+
+# readinessProbe tcpSocket 就绪探针tcp方式
+readinessProbe:
+  tcpSocket:
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 15
+
+# readinessProbe httpGet 就绪探针http方式
+readinessProbe:
+  httpGet:
+    path: /_status/healthz
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 15
+
+# livenessProbe exec 存活探针命令式
+livenessProbe:
+  exec:
+    command:
+      - /bin/health-check
+      - --quiet
+  initialDelaySeconds: 15
+  periodSeconds: 15
+
+# livenessProbe tcpSocket 存活探针tcp方式
+livenessProbe:
+  tcpSocket:
+    port: 80
+  initialDelaySeconds: 15
+  periodSeconds: 15
+
+# livenessProbe httpGet 存活探针http方式
+livenessProbe:
+  httpGet:
+    path: /_status/healthz
+    port: 80
+  initialDelaySeconds: 15
+  periodSeconds: 15
+
+
+# 案例
+kubectl apply -f pod-liveness-exec-redis.yaml
+echo -e "info server\nquit\nexit" | nc 172.18.166.136 6379  # 查看状态
+echo -e "shutdown" | nc 172.18.166.136 6379  # 关闭
+
+## Readiness的Tcpsocket探针
+[root@master prob]# kubectl apply -f pod-readiness-tcpsocket.yaml 
+# 查看状态，不会重启Pod
+kubectl get pod -n demo -w
+# 显示readinessProbe失败，但不会重启
+kubectl describe pod pod-readiness-tcpsocket -n demo
+# 可以看到：由于容器内部没有该端口，所以探测的时候是失败的，所以pod一直无法正常启动
+
+## HttpGet方式案例
+# Http探测通过对容器内容开放的web服务，进行http方法的请求探测，如果探测成功（状态码为2xx和3xx），那么表示http服务是正常的，否则就是失败的
+# HTTP Probe允许针对httpGet配置额外的字段
+# https://kubernetes.io/zh-cn/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#http-probes
+
+# host: 连接使用的主机名，默认是 Pod 的 IP。也可以在 HTTP 头中设置 "Host" 来代替。一般不配置此项
+# scheme : 用于设置连接主机的方式（HTTP 还是 HTTPS）。默认是 "HTTP"。一般不配置此项
+# path: 访问 HTTP 服务的路径。默认值为 "/"。一般会配置此项
+# port: 访问容器的端口号或者端口名。如果数字必须在 1~65535 之间。一般会配置此项
+# httpHeaders: 请求中自定义的 HTTP 头。HTTP 头字段允许重复。一般不配置此项
+
+#示例：
+# httpHeaders:
+#   - name: user_agent
+#     value: curl
+
+# Readiness的httpGet探针
+# 通过readiness的属性，尝试判断资源对象是否准备好了相关服务，来接受用户请求
+# 如果readiness监测失败，相关的service会将此pod从Endpoints中移除，但不会重启pod
+# 创建容器
+[root@master prob]# kubectl apply -f pod-readiness-http.yaml 
+# 实时监控
+[root@master prob]# kubectl get pod -n demo -w
+# 状态检测
+[root@master prob]# kubectl describe pod pod-readiness-http -n demo
+# 发送指令，将状态变为失败
+[root@master prob]# kubectl exec -it pod-readiness-http -n demo -- /bin/bash 
+root@pod-readiness-http:/# rm -rf /usr/share/nginx/html/index.html 
+# 若需要恢复，再创建回来 

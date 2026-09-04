@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-liveness-http
+  namespace: demo
+  labels: 
+    app: pod-liveness-http
+spec:
+  containers:
+  - name: pod-liveness-http-container
+    image: nginx:1.27.0
+    ports:
+    - name: http
+      containerPort: 80
+    livenessProbe:
+      httpGet:
+        port: http  # 或者指定80，如果非标准端口可以指定端口号
+        path: /index.html
+      initialDelaySeconds: 1
+      periodSeconds: 3 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pod-readiness-tcpsocket-svc
+  namespace: demo
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app: pod-liveness-http

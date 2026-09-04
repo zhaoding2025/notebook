@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-redis
+  namespace: demo
+spec:
+  nodeName: node1               #指定运行在指定worker主机上
+  volumes:
+  - name: redis-backup
+    hostPath:
+      path: /backup/redis        #宿主机的目录会自动创建
+  containers:
+    - name: hostpath-redis
+      image: redis:6.0
+      volumeMounts:
+        - name: redis-backup
+          mountPath: /data

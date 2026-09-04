@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-emptydir
+  labels:
+    name: storage-emptydir
+spec:
+  volumes:
+  - name: empty-volume
+    emptyDir: {}
+  containers:
+    - name: storage-emptydir-container
+      image: wangxiaochun/nginx:1.20.0
+      volumeMounts:
+        - name: empty-volume
+          mountPath: /nginx/www/empty/
