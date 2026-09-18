@@ -613,10 +613,240 @@ server {
         root   /usr/share/nginx/html;
     }
 }
+# 命令行创建CM
+[root@master Sep]# kubectl create configmap cm-nginx-conf-files --from-file=nginx-conf.d/default.conf
+# 清单文件
+[root@master1 yaml]#cat storage-configmap-nginx-file.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-nginx-index
+data:
+  index.html: "Nginx Configmap page!"      # 单行内容的文件生成configmap
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-nginx-conf-configmap
+spec:
+  volumes:
+    - name: nginx-conf
+      configMap:
+        name: cm-nginx-conf-files
+        optional: false
+    - name: nginx-index
+      configMap:
+        name: cm-nginx-index
+        optional: false
+  containers:
+    - image: wangxiaochun/nginx:1.20.0
+      name: nginx
+      volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d
+          readOnly: true
+        - name: nginx-index
+          mountPath: /usr/share/nginx/html/
+          readOnly: true
+# 部署pod
+[root@master Sep]# kubectl apply -f storage-configmap-nginx-file.yaml 
+# 在线编辑cm
+[root@master Sep]# kubectl edit cm cm-nginx-conf-files
+[root@master Sep]# kubectl edit cm cm-nginx-index
+[root@master Sep]# kubectl exec -it pod-nginx-conf-configmap -- sh
+# nginx -s reload
+# 验证配置文件结果
+[root@master Sep]# curl 172.18.104.23:8888
+zhaoding Nginx Configmap page!
+# 删除
+[root@master Sep]# kubectl delete -f storage-configmap-nginx-file.yaml 
+[root@master Sep]# kubectl delete configmap cm-nginx-conf-files
 
 
+5.6 范例: volume 挂载 CM 中部分文件
+#准备配置文件
+[root@master1 ~]#ls nginx-conf.d/
+default.conf  myserver.conf  myserver-gzip.cfg  myserver-status.cfg
+#配置文件
+[root@master1 ~]#cat nginx-conf.d/myserver.conf
+#子配置文件,注意:文件是以cfg为后缀,不能以conf文件后缀,会导致冲突
+[root@master1 ~]#cat nginx-conf.d/myserver-gzip.cfg
+gzip on;
+gzip_comp_level 5;
+gzip_proxied    expired no-cache no-store private auth;
+gzip_types text/plain text/css application/xml text/javascript;
+[root@master1 ~]#cat nginx-conf.d/myserver-status.cfg
+location /nginx-status {
+    stub_status on;
+    access_log off;
+}
+#创建cm
+[root@master1 ~]#kubectl create cm cm-nginx-conf-files --from-file=nginx-conf.d/
+[root@master1 yaml]#cat storage-configmap-nginx-subfile.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-nginx-index
+data:
+  index.html: "Nginx Sub Configmap Page!\n"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-cm-nginx-conf
+spec:
+  volumes:
+    - name: nginx-conf
+      configMap:
+        name: cm-nginx-conf-files
+        items:
+          - key: myserver.conf
+            path: myserver.conf
+            mode: 0644
+          - key: myserver-status.cfg
+            path: myserver-status.cfg
+            mode: 0644
+          - key: myserver-gzip.cfg
+            path: myserver-gzip.cfg
+            mode: 0644
+        optional: false
+    - name: nginx-index
+      configMap:
+        name: cm-nginx-index
+        optional: false
+  containers:
+    - image: wangxiaochun/nginx:1.20.0
+      name: pod-cm-nginx-conf-container
+      volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d
+          readOnly: true
+        - name: nginx-index
+          mountPath: /usr/share/nginx/html/
+          readOnly: true
+#创建资源
+[root@master1 yaml]#kubectl apply -f storage-configmap-nginx-subfile.yaml
+[root@master1 ~]#kubectl get cm
+NAME                DATA   AGE
+cm-nginx-conf-files   4      49s
+cm-nginx-index        1      47s
+[root@master1 ~]#kubectl get cm cm-nginx-index -o yaml
+#查看资源
+[root@master1 ~]#kubectl get cm cm-nginx-conf-files -o yaml
+#查看容器的文件
+[root@master1 yaml]#kubectl exec -it pod-cm-nginx-conf -- ls -al /etc/nginx/conf.d/
+total 12
+drwxrwxrwx 3 root root 4096 Mar  9 03:49 .
+drwxr-xr-x 1 root root 4096 May 12  2021 ..
+drwxr-xr-x 2 root root 4096 Mar  9 03:49 ..2022_03_09_03_49_56.2172224076
+lrwxrwxrwx 1 root root   32 Mar  9 03:49 ..data -> ..2022_03_09_03_49_56.2172224076
+lrwxrwxrwx 1 root root   24 Mar  9 03:49 myserver-gzip.cfg -> ..data/myserver-gzip.cfg
+lrwxrwxrwx 1 root root   26 Mar  9 03:49 myserver-status.cfg -> ..data/myserver-status.cfg
+lrwxrwxrwx 1 root root   20 Mar  9 03:49 myserver.conf -> ..data/myserver.conf
+[root@master1 ~]#kubectl get pod -o wide
+NAME                READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+pod-cm-nginx-conf   1/1     Running   0          7s    172.16.1.15   node1.wang.org   <none>           <none>
+#访问验证
+[root@master1 ~]#kubectl exec -it pod-cm-nginx-conf -- ls /etc/nginx/conf.d/
+myserver-gzip.cfg  myserver-status.cfg  myserver.conf
+[root@master1 ~]#curl 172.16.1.15:8888
+Nginx Sub Configmap Page!
+[root@master1 ~]#curl 172.16.1.15:8888/nginx-status
+[root@master1 ~]#curl -I --compressed 172.16.1.15:8888
+HTTP/1.1 200 OK
+Server: nginx/1.20.0
+Content-Type: text/html
+Connection: keep-alive
+ETag: W/"623c6c59-1a"
+Content-Encoding: gzip
+#更新配置
+[root@master1 ~]#kubectl edit cm cm-nginx-index
+apiVersion: v1
+data:
+  index.html: |
+    Nginx Sub Configmap Page changed! #修改此行
+#更新完配置立即生效
+[root@master1 ~]#curl 172.16.1.15:8888
+Nginx Sub Configmap Page changed!
+#更新配置
+[root@master1 ~]#kubectl edit cm cm-nginx-conf-files
+myserver.conf: |
+  server {
+      listen 9999; #修改此行
+      server_name www.wang.org;
+#在线更新完配置文件的时间戳没有变化，但文件内容变化了
+[root@master1 ~]#kubectl exec -it pod-cm-nginx-conf -- ls -al /etc/nginx/conf.d/
+[root@master1 ~]#curl 172.16.1.15:9999
+curl: (7) Failed to connect to 172.16.1.15 port 9999: Connection refused
+[root@master1 ~]#kubectl exec -it pod-cm-nginx-conf -- nginx -s reload
+2022/03/24 13:17:56 [notice] 43#43: signal process started
+[root@master1 ~]#curl 172.16.1.15:9999
+Nginx Sub Configmap Page changed!
+#删除资源
+[root@master1 yaml]#kubectl delete -f storage-configmap-nginx-subfile.yaml
+[root@master1 yaml]#kubectl delete cm cm-nginx-conf-files
 
 
+5.7 范例: volume 挂载 CM 并利用 subpath 修改配置文件名称
+kubectl explain pod.spec.volumes.configMap.items
+kubectl explain pod.spec.containers.volumeMounts
+
+#准备配置文件同上一样
+[root@master1 yaml]#ls nginx-conf.d/
+default.conf  myserver.conf  myserver-gzip.cfg  myserver-status.cfg
+
+#将上面的配置文件都加入cm
+[root@master1 yaml]#kubectl create cm cm-nginx-conf-files --from-file=nginx-conf.d/
+
+[root@master1 yaml]#cat storage-configmap-nginx-usesubfile.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-nginx-index
+data:
+  index.html: "Nginx Use Sub Configmap Page!\n"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-cm-nginx-conf
+spec:
+  volumes:
+  - name: nginx-conf
+    configMap:
+      name: cm-nginx-conf-files
+      optional: false
+  - name: nginx-index
+    configMap:
+      name: cm-nginx-index
+      optional: false
+  containers:
+  - image: wangxiaochun/nginx:1.20.0
+    name: pod-cm-nginx-conf-container
+    volumeMounts:
+    - name: nginx-conf
+      mountPath: /etc/nginx/conf.d/myserver2.conf
+      subPath: myserver.conf
+      readOnly: true
+    - name: nginx-conf
+      mountPath: /etc/nginx/conf.d/myserver-gzip2.cfg #修改配置文件名
+      subPath: myserver-gzip.cfg
+      readOnly: true
+    - name: nginx-index
+      mountPath: /usr/share/nginx/html/
+      readOnly: true
+#应用
+[root@master1 yaml]#kubectl apply -f storage-configmap-nginx-usesubfile.yaml
+
+[root@master1 ~]#kubectl get cm
+NAME                  DATA   AGE
+cm-nginx-conf-files   4      6m56s
+cm-nginx-index        1      4s
+
+[root@master1 ~]#kubectl get cm cm-nginx-conf-files -o yaml
+
+
+  
 
 
 
