@@ -12,13 +12,25 @@ Docker的两种文化存储机制
 #   通过网络的方式，将外部的存储空间挂载到当前宿主机，然后借助于host机制实现容器数据的可持久化
 
 1.2 存储卷volumes
-Kubernetes集群中的容器数据存储
 
+Volume常见问题排查
+Pod挂载失败
+# kubectl describe pod <pod>  
+# - 重点关注Events部分
+PVC一直Pending
+# kubectl get pvc 
+# - 可能没有匹配的PV
+# - 或者StorageClass不存在
+数据库没有保存
+# kubectl describe pvc
+# 确认是否正确挂载
+# 确认mountPath是否写对
 
-
-
-
-
+EmptyDir:临时数据
+HostPath:节点目录
+PV:持久存储资源
+PVC:存储申请
+StorageClass:自动供给
 
 2 emptyDir
 # https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/#emptydir

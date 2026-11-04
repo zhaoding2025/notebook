@@ -7,6 +7,9 @@ Kubernetes配置资源ConfigMap
 - ConfigMap 使用方式
 - ConfigMap 实战案例
 
+总结: ConfigMap是kubernetes用来保存普通、非敏感配置数据的核心资源。比如:数据库地址、redis地址、应用端口、日志级别以及各种功能开关
+              保存的是非密数据,底层的结构完全以key-value键值对形式存在
+
 1. Kubernetes 常见配置资源介绍
 1.1 配置介绍
 ; 生产中所有的应用程序中，都涉及到配置文件，而配置文件经常会有变更，比如: 数据库连接,代码版本号,证书更新等
