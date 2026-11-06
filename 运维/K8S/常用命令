@@ -1,3 +1,145 @@
+CKA 高频 kubectl 速查表
+# 别名（终端执行，可写进 ~/.bashrc / ~/.zshrc）
+alias k=kubectl
+# 补全（bash）
+source <(kubectl completion bash)
+complete -o default -F __start_kubectl k
+# zsh
+source <(kubectl completion zsh)
+💡 CKA 核心技巧：--dry-run=client -o yaml 生成 yaml 模板，不要从零手写 yaml！
+🔹 1. 基础通用｜get /describe/logs /exec
+
+# 查看资源
+k get pods
+k get pods -A                     # 所有namespace
+k get pod xxx -o wide             # 详细信息（节点、IP）
+k get deploy,svc,cm,secret       # 一次性查多种资源
+
+# 查看详细事件（排障第一神器！describe看Events）
+k describe pod <pod-name>
+k describe node <node-name>
+
+# 日志
+k logs <pod-name>
+k logs <pod-name> -c <container-name>  # 多容器指定容器
+k logs -f <pod-name>                  # 持续跟踪 -f follow
+
+# 进入容器
+k exec -it <pod-name> -- /bin/sh
+k exec -it <pod-name> -c <container> -- bash
+
+# 查看事件集群级
+k get events
+k get events -n <ns>
+🔹 2. 上下文 & 命名空间（❗考试超级容易踩坑！）
+# 查看当前context
+k config get-contexts
+# 切换context（题目一般会告诉你要切这个！）
+k config use-context <context-name>
+
+# 查看/切换默认namespace
+k config set-context --current --namespace=<ns>
+k get ns
+🔹 3. 创建资源 dry-run 模板大法 ✨高频
+# 生成yaml，不实际创建（client端dry-run，推荐）
+k create pod mypod --image=nginx --dry-run=client -o yaml > pod.yaml
+
+# apply 创建/更新
+k apply -f pod.yaml
+k apply -f ./dir/          # 目录下所有yaml
+
+# 删除
+k delete pod <podname>
+k delete -f pod.yaml
+k delete pod --all         # 当前ns全部pod（慎用）
+常用 create 快速命令
+# deployment
+k create deploy mydeploy --image=nginx --replicas=3 --dry-run=client -o yaml > deploy.yaml
+
+# service ClusterIP
+k create svc clusterip mysvc --tcp=80:80 --dry-run=client -o yaml > svc.yaml
+# NodePort
+k create svc nodeport mysvc --tcp=80:80 --dry-run=client -o yaml > svc-np.yaml
+
+# configmap
+k create cm mycm --from-literal=key1=val1 --dry-run=client -o yaml > cm.yaml
+k create cm mycm --from-file=/xxx/file
+# secret
+k create secret generic mysec --from-literal=pass=123456 --dry-run=client -o yaml > sec.yaml
+🔹 4. Workloads｜Deployment / ReplicaSet / DaemonSet / Rollout
+k get deploy
+k scale deploy mydeploy --replicas=5                # 扩缩容
+
+# 滚动更新、回滚（高频考点 rollout）
+k rollout status deploy mydeploy                    # 查看更新状态
+k rollout history deploy mydeploy                  # 历史版本
+k rollout undo deploy mydeploy                     # 回滚到上一版
+k rollout undo deploy mydeploy --to-revision=2     # 回滚指定版本
+
+k get rs                                            # replicaset
+k get ds                                            # daemonset
+🔹 5. 资源状态｜top 资源监控（metric-server）
+k top node
+k top pod
+k top pod -n <ns>
+🔹 6. 调度｜Taint & Toleration 污点容忍【⭐高频考点】
+# 查看节点taint
+k describe node <node> | grep -A5 Taints
+
+# 添加taint
+k taint nodes node1 key=value:NoSchedule
+# 删除taint（末尾减号 -）
+k taint nodes node1 key=value:NoSchedule-
+记忆：NoSchedule 新 pod 不会调度；NoExecute 会驱逐正在运行 pod
+🔹 7. RBAC 权限（Role / ClusterRole / Binding）
+bash
+# 创建Role/ClusterRole、binding 常用思路，dry-run生成yaml
+k create role myrole --verb=get,list --resource=pods -n ns1 --dry-run=client -o yaml > role.yaml
+k create rolebinding myrb --role=myrole --user=user1 -n ns1 --dry-run=client -o yaml > rb.yaml
+
+k create clusterrole mycr --verb=get --resource=nodes --dry-run=client -o yaml > cr.yaml
+k create clusterrolebinding mycrb --clusterrole=mycr --user=user1 --dry-run=client -o yaml > crb.yaml
+
+# 验证权限！非常重要
+k auth can-i get pods -n ns1 --as user1
+🔹 8. PV / PVC / StorageClass 存储
+k get pv
+k get pvc
+k get sc
+k describe pv <pvname>
+k describe pvc <pvcname>
+🔹 9. Service & NetworkPolicy
+k get svc
+k get endpoints
+k get endpointslice
+
+# networkpolicy（大多手写yaml，dry-run很少直接create）
+k get netpol -n <ns>
+🔹 10. 节点维护（cordon /drain 维护节点 ⭐常考）
+k get nodes
+k cordon node1        # 标记节点不可调度（新pod不会过来）
+k uncordon node1      # 恢复可调度
+k drain node1         # 驱逐pod，准备维护（--ignore-daemonsets 经常要加！）
+k drain node1 --ignore-daemonsets
+🔹 11. 编辑资源
+k edit pod <podname>
+k edit deploy <deploy>
+# ⚠️ 注意：有些资源不能直接edit，优先apply
+🔹 12. 输出格式化（-o）
+-o wide
+-o yaml
+-o json
+-o custom-columns=xxx  # 自定义列（偶尔排障会用到）
+
+
+# 标记节点标签 label
+k label nodes node1 zone=east
+k label nodes node1 zone-   # 删除标签（后缀减号）
+k get node --show-labels
+
+
+
+
 基本命令
 # create
 kubectl create -f ./nginx.yaml   # 创建资源
