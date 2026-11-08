@@ -1,0 +1,33 @@
+# ============================================================
+# 第五课附录 A：StatefulSet 扩容单块 PVC 容量（易被忽略）
+# ------------------------------------------------------------
+# 事实：volumeClaimTemplates 是"模板"，修改它不会影响已存在的 PVC。
+#      K8s 无法自动扩容已生成 PVC。
+#
+# 三种处理方式：
+#   ① 手动逐个 patch PVC（下面给命令，最常用）
+#   ② 用 operator（如 K8s 1.32+ 的 StatefulSetAutoDeletePVC 之外，
+#      更常见是各 DB operator 自带扩容逻辑）
+#   ③ 迁移到新 StatefulSet
+#
+# 前提：SC 必须 allowVolumeExpansion: true，且 CSI 驱动支持在线扩容
+#
+# ---- 命令（以 data-store-0 为例）----
+#   kubectl patch pvc data-store-0 -p \
+#     '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}'
+#   kubectl get pvc data-store-0 -w      # 状态会短暂 Resizing，之后容量变为 2Gi
+#
+# ---- 缩容是不可能的第一步：先扩后缩 ---- 
+#   PVC 只能扩不能缩（K8s 不允许）。需要缩容只能重建 PVC。
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pvc-expand-notes
+data:
+  notes: |
+    1. volumeClaimTemplates 改大小 → 只影响未来新建的 PVC
+    2. 已存在的 PVC 需 kubectl patch 或 edit 手动扩
+    3. SC 需设置 allowVolumeExpansion: true
+    4. 扩容后需 Pod 重启才能看到新空间（部分驱动支持在线扩）
+    5. PVC 不可缩容

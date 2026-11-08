@@ -1,0 +1,155 @@
+# ============================================================
+# 第五课：进阶能力合集
+# ------------------------------------------------------------
+# 本文件一次演示 6 个进阶特性，逐条看注释：
+#   ① podManagementPolicy: Parallel
+#   ② 多端口 + 命名端口（Headless 多端口必须命名）
+#   ③ 拓扑分布约束 topologySpreadConstraints
+#   ④ 本地盘 SC + volumeBindingMode: WaitForFirstConsumer
+#   ⑤ VCT 里自定义 storageClassName / 标签 / 注解
+#   ⑥ 优雅终止 + preStop 钩子（对有状态服务至关重要）
+# ============================================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-ssd
+provisioner: kubernetes.io/no-provisioner    # 本地盘需预建 PV；或用 local-path 等
+# 关键：延迟绑定。Pod 未调度前不创建/绑定 PV
+# 原因：本地盘 PV 绑定到特定节点，必须等 Pod 完成调度才能确定节点
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adv
+  labels:
+    app: adv
+spec:
+  clusterIP: None
+  # 多端口时每个 port 必须有唯一 name —— 这是硬性要求
+  selector:
+    app: adv
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: adv
+spec:
+  serviceName: adv
+  replicas: 4
+  selector:
+    matchLabels:
+      app: adv
+  # ① 并行管理：所有副本同时创建/删除
+  # 适合：成员无启动顺序依赖（如 Cassandra、ClickHouse 分片）
+  # 不适合：主从复制、选主类（如 MySQL 组复制、etcd）
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        app: adv
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      terminationGracePeriodSeconds: 60
+      # ③ 拓扑分布约束：按可用区尽量均摊
+      #    与 podAntiAffinity 的区别：这个是"均匀分布"，反亲和是"不要同节点"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway   # DoNotSchedule = 硬约束
+          labelSelector:
+            matchLabels:
+              app: adv
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: adv
+      containers:
+        - name: app
+          image: nginx:1.25-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9090
+            - name: metrics
+              containerPort: 9100
+          # ⑥ 优雅终止：SIGTERM 后会等待这段时间
+          #    preStop 在 SIGTERM 之前/同时执行，用于：
+          #    - 从集群中主动摘除自己（触发 leader 移交）
+          #    - 完成请求排空、刷盘
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    echo "draining $(hostname)..."
+                    # 真实场景可调用自身 API 让 leader 主动 step down
+                    sleep 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          # 启动探针：防止慢启动被 liveness 反复杀死
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
+  # ⑤ VCT 里可以指定 SC、labels、annotations
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: adv
+          tier: hot
+        annotations:
+          # 有些 CSI 驱动支持用注解改参数（如备份策略）
+          backup.example.com/enabled: "false"
+      spec:
+        # 不写则用集群默认 SC；显式写更安全
+        storageClassName: local-ssd
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

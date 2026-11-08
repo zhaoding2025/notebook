@@ -1,0 +1,118 @@
+# ============================================================
+# 第三课：volumeClaimTemplates — 每个 Pod 一块独立持久盘
+# ------------------------------------------------------------
+# 这是 StatefulSet 最核心的机制。
+#
+# 它做什么：
+#   为每个副本自动创建 PVC：<模板名>-<statefulset名>-<序号>
+#   例如 data-nginx-sts-0 / data-nginx-sts-1 / data-nginx-sts-2
+#
+# 关键性质：
+#   1) PVC 与 Pod 序号"绑定"。nginx-sts-1 重建后仍然挂 data-nginx-sts-1
+#   2) 删 Pod / 缩容（删序号）都不会删 PVC —— 数据保全
+#   3) 删 StatefulSet 也不删 PVC（K8s 1.27+ 有 persistentVolumeClaimRetentionPolicy 可控制）
+#   4) 缩容到 2 再扩容回 3，nginx-sts-2 会重新挂回原来那块盘 → 数据还在
+#
+# ⚠️ 与 Deployment 的本质区别：
+#   Deployment 用共享 PVC（ReadWriteMany）或无状态；StatefulSet 用"每副本独占 PVC"
+#
+# StorageClass 依赖：本文件用 local-path（k3s/kind 自带）
+# 云上可换成 gp3(aws) / standard(gke) / csi-disk(aliyun)
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+spec:
+  clusterIP: None
+  selector:
+    app: db
+  ports:
+    - name: mysql
+      port: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+spec:
+  serviceName: db
+  replicas: 3
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      # 让节点知道有本地盘，Pod 尽量不被调度到没有盘的节点
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          env:
+            # 用序号派生不同密码/ID 的常见手法（此处仅演示）
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-root-secret
+                  key: password
+            # 让每个副本有唯一的 server-id —— MySQL 主从/组复制必需
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command:
+            - bash
+            - -c
+            - |
+              ORDINAL="${POD_NAME##*-}"
+              echo "starting mysql replica #${ORDINAL}, server-id=$((100 + ORDINAL))"
+              exec docker-entrypoint.sh mysqld \
+                --server-id=$((100 + ORDINAL)) \
+                --datadir=/var/lib/mysql
+          ports:
+            - name: mysql
+              containerPort: 3306
+          volumeMounts:
+            - name: data            # ← 对应下面的 name
+              mountPath: /var/lib/mysql
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          # 数据库启动慢，探针要给足时间，否则会反复重启
+          startupProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)"]
+            failureThreshold: 30      # 30 × 10s = 5 分钟容忍
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)"]
+            periodSeconds: 20
+  # ---------------- 核心：每副本一块盘的模板 ----------------
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]   # RWO：只能被单节点挂载，正好符合"独占"
+        # storageClassName: local-path   # 不写则用集群默认 SC
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-root-secret
+type: Opaque
+stringData:
+  password: "ChangeMe_123"

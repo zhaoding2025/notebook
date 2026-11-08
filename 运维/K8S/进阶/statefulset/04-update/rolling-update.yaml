@@ -1,0 +1,78 @@
+# ============================================================
+# 第四课：更新策略 —— RollingUpdate 的"逆序滚动"
+# ------------------------------------------------------------
+# StatefulSet 与 Deployment 的滚动更新方向相反：
+#   Deployment  : 随机/批量，新 Pod 先起再杀旧 Pod，抽象成"副本池"
+#   StatefulSet : 严格从最大序号开始，一次一个，
+#                 必须"旧 Pod 终止且新 Pod Ready"才继续下一个
+#
+# 更新过程（replicas=3, partition=0）：
+#   3 → 停 3 → 起新 3 → Ready → 2 → 停 2 → 起新 2 → Ready → 1 ...
+#   期间集群容量暂时少 1 个副本，但保证"成员身份连续可用"
+#
+# partition（分区更新 / 金丝雀）：
+#   partition: 2  表示只更新序号 >= 2 的 Pod（即 2,1,0 中的 2 先更新）
+#   常用于：让 0 号（通常是主节点/leader）最后更新，降低集群抖动
+#   逐步降低 partition 即为"渐进式灰度"
+#
+# 三阶段灰度实战：
+#   1) partition: 2  → 只有 store-2 变新版本，验证
+#   2) partition: 1  → store-2,1 变新版本
+#   3) partition: 0  → 全部更新，最后更新 0 号（主）
+#
+# 也支持 OnDelete：手动删 Pod 才更新（完全手动控制，适合敏感集群）
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: roll
+spec:
+  clusterIP: None
+  selector:
+    app: roll
+  ports:
+    - name: http
+      port: 80
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: roll
+spec:
+  serviceName: roll
+  replicas: 3
+  selector:
+    matchLabels:
+      app: roll
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # 只有序号 >= partition 的 Pod 才被更新
+      # 0 = 全部更新；2 = 只更新 2 号；99 = 全部冻结（相当于手动模式）
+      partition: 0
+    # 类型换成 OnDelete 时，只在你手动删除 Pod 时才用新模板重建
+  # 最小就绪时间：Pod Ready 后需持续这么久才被认为"更新成功"，
+  # 避免"假就绪"（刚启动就自检通过、几秒后崩溃）导致更新误判
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        app: roll
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.25-alpine       # 灰度时改为 1.26-alpine / 1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          command:
+            - sh
+            - -c
+            - |
+              echo "host=$(hostname) version=1.25" > /usr/share/nginx/html/index.html
+              exec nginx -g 'daemon off;'
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 3

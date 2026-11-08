@@ -1,0 +1,106 @@
+# ============================================================
+# 第五课附录 B：StatefulSet + 水平扩容（HPA）+ PodDisruptionBudget
+# ------------------------------------------------------------
+# 重要限制：StatefulSet 可以接 HPA，但要想清楚语义。
+#
+#   对"无状态伪装成有状态"的服务（如基于序号的缓存分片）：
+#     扩容会新增奇数号成员，需要应用自己做 rebalance —— 大多数应用不会
+#
+#   对有状态集群（etcd/zk/mysql 组复制）：
+#     不要用 HPA。副本数变化 = 集群成员变化，需要运维级操作
+#     （如 etcd 加成员要执行 etcdctl member add）
+#
+#   实践：HPA 挂 StatefulSet 多见于"每副本独立分片"的读缓存场景。
+#
+# PDB 则强烈建议：保证主动驱逐（节点维护）时集群不失去太多成员。
+#   对有状态集群：maxUnavailable: 1 通常合适
+#   minAvailable 用副本数 -1 亦可，但扩缩容后需同步修改
+# ============================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cache
+spec:
+  serviceName: cache
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+        - name: cache
+          image: redis:7-alpine
+          args: ["--appendonly", "yes", "--dir", "/data"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache
+spec:
+  clusterIP: None
+  selector:
+    app: cache
+  ports:
+    - name: redis
+      port: 6379
+---
+# PDB：节点排空/维护时，最多同时驱逐 1 个副本
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cache-pdb
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: cache
+---
+# HPA：仅在应用支持分片 rebalance 时启用（此例保留为演示）
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cache-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: cache
+  minReplicas: 3
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    # 扩容快、缩容慢：避免缩容误杀有数据的副本
+    scaleUp:
+      stabilizationWindowSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300

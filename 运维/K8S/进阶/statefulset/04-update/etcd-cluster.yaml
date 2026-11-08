@@ -1,0 +1,141 @@
+# ============================================================
+# 第四课附录：在集群内自建 etcd 三节点 —— 真实生产级 StatefulSet
+# ------------------------------------------------------------
+# 为什么用 etcd 举例最好？
+#   1) 它天生需要"每个成员有固定名字 + 固定 DNS + 固定数据目录"
+#   2) 它必须知道"初始集群有哪几个成员"（--initial-cluster）
+#   3) 成员间通过 DNS 互相发现并完成选主 —— 完美体现 StatefulSet 价值
+#
+# 关键设计点逐条注释在下方。
+# ⚠️ 生产环境请务必启用 TLS；此处为学习用简化版。
+# 顺序提示：先 apply Service，再逐个观察 etcd-0 起来后 etcd-1 才启动。
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  labels:
+    app: etcd
+spec:
+  clusterIP: None            # Headless：让成员用 <pod>.etcd 互相直连
+  selector:
+    app: etcd
+  ports:
+    - name: client
+      port: 2379
+    - name: peer
+      port: 2380
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+spec:
+  serviceName: etcd
+  replicas: 3
+  selector:
+    matchLabels:
+      app: etcd
+  # etcd 允许并行启动，因为 initial-cluster 里已经写好了全部成员
+  # 若用 OrderedReady，0 号会等待 quorum，可能卡住 —— 这里必须 Parallel
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      # etcd 对中断敏感：给它足够的优雅退出时间做 leader 移交
+      terminationGracePeriodSeconds: 30
+      # 多副本不要挤在同一节点，降低单节点故障影响
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: etcd
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:v3.5.10
+          ports:
+            - name: client
+              containerPort: 2379
+            - name: peer
+              containerPort: 2380
+          env:
+            # ---- 身份：来自 Pod 名 ----
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # ---- 发现：来自 Headless Service 的固定域名 ----
+            # 不能硬编码 IP，也不能用 Service 的 VIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # 集群成员清单：etcd-0=http://etcd-0.etcd:2380,...
+            - name: INITIAL_CLUSTER
+              value: "etcd-0=http://etcd-0.etcd:2380,etcd-1=http://etcd-1.etcd:2380,etcd-2=http://etcd-2.etcd:2380"
+            - name: INITIAL_CLUSTER_STATE
+              value: "new"       # 已有集群恢复时改 existing
+            - name: INITIAL_CLUSTER_TOKEN
+              value: "my-etcd-cluster"
+          command:
+            - /usr/local/bin/etcd
+            - --name=$(POD_NAME)
+            - --data-dir=/var/lib/etcd/data
+            # 客户端监听所有地址（Pod IP 会变，但不能写死）
+            - --listen-client-urls=http://0.0.0.0:2379
+            - --advertise-client-urls=http://$(POD_NAME).etcd.$(NAMESPACE).svc.cluster.local:2379
+            # peer 通信：用稳定域名而非 IP，宕机重启后其他成员仍能找到它
+            - --listen-peer-urls=http://0.0.0.0:2380
+            - --initial-advertise-peer-urls=http://$(POD_NAME).etcd.$(NAMESPACE).svc.cluster.local:2380
+            - --initial-cluster=$(INITIAL_CLUSTER)
+            - --initial-cluster-state=$(INITIAL_CLUSTER_STATE)
+            - --initial-cluster-token=$(INITIAL_CLUSTER_TOKEN)
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/etcd
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - etcdctl endpoint health --endpoints=http://127.0.0.1:2379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - etcdctl endpoint health --endpoints=http://127.0.0.1:2379
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

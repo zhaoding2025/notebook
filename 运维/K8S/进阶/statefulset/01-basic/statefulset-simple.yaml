@@ -1,0 +1,77 @@
+# ============================================================
+# 入门第一课：最小可运行的 StatefulSet
+# ------------------------------------------------------------
+# 观察重点：
+#   kubectl get pods -l app=nginx-sts -w
+#   1) Pod 名是 nginx-sts-0 / -1 / -2（有序，不是随机 hash）
+#   2) 创建顺序 0 → 1 → 2（串行，前一个 Ready 才创建下一个）
+#   3) 删除时 2 → 1 → 0（逆序）
+#   4) 每个 Pod 有稳定的 DNS 名：<pod>.<svc>.<ns>.svc.cluster.local
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-sts
+  labels:
+    app: nginx-sts
+spec:
+  # clusterIP: None 是 StatefulSet 的"标配"，叫 Headless Service
+  # 它不分配 VIP，DNS 直接返回所有 Pod IP
+  clusterIP: None
+  selector:
+    app: nginx-sts
+  ports:
+    - name: http          # StatefulSet 的 Service 端口建议都命名
+      port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nginx-sts
+spec:
+  # serviceName 必须指向上面的 Headless Service
+  # 这是 StatefulSet 生成稳定 DNS 的依据，写错 Pod 就没有域名
+  serviceName: nginx-sts
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-sts
+  # podManagementPolicy: OrderedReady（默认）
+  #   - 串行创建/删除，保证顺序
+  # podManagementPolicy: Parallel
+  #   - 并行创建，仍保留稳定身份，但不保证启动顺序
+  podManagementPolicy: OrderedReady
+  template:
+    metadata:
+      labels:
+        app: nginx-sts
+    spec:
+      # 必须为 False，否则 Pod 之间无法互相解析主机名
+      # （hostname 相同会导致 DNS 冲突）
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          # 演示身份：把主机名写进 index.html
+          command:
+            - sh
+            - -c
+            - |
+              echo "I am $(hostname), ordinal=$(hostname | rev | cut -d- -f1 | rev)" > /usr/share/nginx/html/index.html
+              exec nginx -g 'daemon off;'
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 3
