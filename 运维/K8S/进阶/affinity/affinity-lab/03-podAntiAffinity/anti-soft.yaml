@@ -1,0 +1,31 @@
+# 实验3B:podAntiAffinity 反亲和 —— 软约束(preferred)
+# 语义:尽量把 web 副本分散到不同节点,实在没机器也允许挤一挤(不会 Pending)
+# 生产推荐用这种,避免副本数 > 节点数时卡死
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web2
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web2
+  template:
+    metadata:
+      labels:
+        app: web2
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values: ["web2"]
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: web
+        image: nginx

@@ -1,0 +1,26 @@
+# 实验4:topologySpreadConstraints —— 让副本在拓扑域间均匀分布
+# 比 anti-affinity 更精确:指定「域与域之间的副本数差值上限 maxSkew」
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web3
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: web3
+  template:
+    metadata:
+      labels:
+        app: web3
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway   # 或 DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: web3
+      containers:
+      - name: web
+        image: nginx

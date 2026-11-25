@@ -1,0 +1,13 @@
+# 实验2:目标 Pod(redis)
+# 必须先创建这个,web 的 podAffinity 才有"目标"可找
+# 标签 app=redis 是亲和规则要匹配的开关
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  containers:
+  - name: redis
+    image: redis

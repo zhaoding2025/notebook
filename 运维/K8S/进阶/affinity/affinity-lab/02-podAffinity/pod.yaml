@@ -1,0 +1,20 @@
+# 实验2:podAffinity 同节点亲和(硬约束)
+# 语义:web 必须与某个 app=redis 的 Pod 运行在同一台机器(topologyKey=hostname)
+# 注意:嵌套的 labelSelector 里 values 数组写 ["redis"]
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+spec:
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values: ["redis"]
+        topologyKey: kubernetes.io/hostname
+  containers:
+  - name: web
+    image: nginx

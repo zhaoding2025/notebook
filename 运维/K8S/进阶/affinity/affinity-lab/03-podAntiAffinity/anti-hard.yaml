@@ -1,0 +1,30 @@
+# 实验3a:podAntiAffinity 反亲和 —— 硬约束(required)
+# 语义:同一 app=web 的 Pod 必须分散到不同节点(一台机器只放一个副本)
+# 危险:若 replicas 超过可用节点数,多余的副本会永久 Pending
+# (本文件不会被 03-run.sh 直接 apply,靠 patch 演示,先做硬约束)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["web"]
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: web
+        image: nginx

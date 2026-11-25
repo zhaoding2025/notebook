@@ -1,0 +1,18 @@
+# 实验1a:nodeAffinity 硬约束(required)
+# 语义:必须调度到带 disktype=ssd 的节点(master 与 node1,node2 排除)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aff-hard
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: disktype
+            operator: In
+            values: ["ssd"]
+  containers:
+  - name: c
+    image: nginx

@@ -1,0 +1,19 @@
+# 实验1b:nodeAffinity 软约束(preferred,权重100)
+# 语义:优先去 zone-a,但 zone-a 不可用时也能去别的节点
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aff-soft
+spec:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: zone
+            operator: In
+            values: ["zone-a"]
+  containers:
+  - name: c
+    image: nginx
